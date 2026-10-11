@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CodeForge MCA — Practice. Compete. Conquer.</title>
+    <meta name="description" content="The ultimate coding practice platform for MCA students. Practice HackerRank-style problems in Java, C, Python, and JavaScript. Climb the leaderboard and ace your placements." />
+    <meta name="keywords" content="MCA coding, placement prep, Java, Python, C, JavaScript, competitive programming, leaderboard" />
+    <meta name="author" content="CodeForge MCA" />
+    <!-- Open Graph -->
+    <meta property="og:title" content="CodeForge MCA — Practice. Compete. Conquer." />
+    <meta property="og:description" content="The ultimate coding practice platform for MCA students." />
+    <meta property="og:type" content="website" />
+    <!-- Prevent DevTools access via right-click -->
+    <script>
+      // Additional anti-inspect protection
+      document.addEventListener('contextmenu', function(e) {
+        if (e.target.closest && e.target.closest('.monaco-editor')) {
+          e.preventDefault();
+        }
+      });
+      // Detect devtools opening
+      (function() {
+        const threshold = 160;
+        setInterval(() => {
+          if (window.outerWidth - window.innerWidth > threshold ||
+              window.outerHeight - window.innerHeight > threshold) {
+            document.title = '⚠️ DevTools Detected!';
+          } else {
+            document.title = 'CodeForge MCA';
+          }
+        }, 1000);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────────
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(uid) { return request.auth.uid == uid; }
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'superadmin'];
+    }
+    function isSuperAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin';
+    }
+
+    // ── Users ───────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isOwner(uid);
+      // Only the user can update their own score/stats, or admin can change role
+      allow update: if isOwner(uid) || isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── Problems ────────────────────────────────────────────────
+    match /problems/{problemId} {
+      allow read: if true;  // Public can read problems
+      allow create, update, delete: if isAdmin();
+
+      // Comments subcollection
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn();
+        allow update: if isSignedIn() && (isOwner(resource.data.userId) || isAdmin());
+        allow delete: if isSignedIn() && (isOwner(resource.data.userId) || isAdmin());
+      }
+    }
+
+    // ── Submissions ─────────────────────────────────────────────
+    match /submissions/{submissionId} {
+      allow read: if true;  // Public leaderboard
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+  }
+}
