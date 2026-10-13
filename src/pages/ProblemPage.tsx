@@ -1,27 +1,37 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { doc, getDoc, collection, addDoc, getDocs, query, where, orderBy, serverTimestamp, updateDoc, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
+import {
+  doc, getDoc, collection, addDoc, getDocs, query, where, orderBy,
+  serverTimestamp, updateDoc, increment, arrayUnion, arrayRemove,
+} from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import Editor from '@monaco-editor/react';
-import { Play, Send, ThumbsUp, ThumbsDown, MessageCircle, ChevronDown, ChevronUp, Clock, Loader2, CheckCircle2, XCircle, Terminal, BookOpen, Trophy } from 'lucide-react';
+import {
+  Play, Send, ThumbsUp, ThumbsDown, MessageCircle, Clock,
+  Loader2, CheckCircle2, XCircle, Terminal, BookOpen, Trophy, RotateCcw,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import Navbar from '../components/Navbar';
 import type { Problem } from './ProblemsPage';
 
-const LANG_OPTIONS = [
-  { id: 'java', label: 'Java', mono: 'java' },
-  { id: 'c', label: 'C', mono: 'c' },
-  { id: 'python', label: 'Python', mono: 'python' },
-  { id: 'javascript', label: 'JavaScript', mono: 'javascript' },
+// ── Language options ──────────────────────────────────────────────
+type LangId = 'java' | 'c' | 'python' | 'javascript';
+
+const LANG_OPTIONS: { id: LangId; label: string; pistonLang: string; pistonVersion: string }[] = [
+  { id: 'java',       label: 'Java',       pistonLang: 'java',       pistonVersion: '15.0.2'  },
+  { id: 'c',         label: 'C',          pistonLang: 'c',          pistonVersion: '10.2.0'  },
+  { id: 'python',    label: 'Python',     pistonLang: 'python',     pistonVersion: '3.10.0'  },
+  { id: 'javascript',label: 'JavaScript', pistonLang: 'javascript', pistonVersion: '18.15.0' },
 ];
 
+// ── Types ─────────────────────────────────────────────────────────
 interface Comment {
   id: string;
   userId: string;
   userName: string;
   text: string;
-  createdAt: any;
+  createdAt: { toDate?: () => Date } | null;
   likes: string[];
   dislikes: string[];
 }
@@ -33,83 +43,165 @@ interface Submission {
   language: string;
   status: 'accepted' | 'wrong_answer' | 'error';
   runtime: number;
-  createdAt: any;
+  createdAt: { toDate?: () => Date } | null;
 }
 
-// ── Anti-paste / anti-inspect security ──
-const useAntiCheat = (editorRef: React.MutableRefObject<any>) => {
+interface RunResult {
+  status: 'accepted' | 'wrong_answer' | 'error';
+  output: string;
+  runtime: number;
+  passed: number;
+  total: number;
+  testDetails: { input: string; expected: string; got: string; passed: boolean }[];
+}
+
+// ── Anti-cheat (paste + devtools block, inside Monaco only) ──────
+function useAntiCheat() {
   useEffect(() => {
     const blockPaste = (e: ClipboardEvent) => {
       const target = e.target as Element;
-      if (target.closest('.monaco-editor') || target.closest('[data-mode-id]')) {
+      if (target.closest?.('.monaco-editor') || target.closest?.('[data-mode-id]')) {
         e.stopPropagation();
-        // Allow normal typing but block paste
         e.preventDefault();
         toast.error('🚫 Pasting is disabled! Type your solution.', { id: 'no-paste' });
       }
     };
-    const blockContextMenu = (e: MouseEvent) => {
-      const target = e.target as Element;
-      if (target.closest('.monaco-editor')) { e.preventDefault(); }
+    const blockCtxMenu = (e: MouseEvent) => {
+      if ((e.target as Element).closest?.('.monaco-editor')) e.preventDefault();
     };
     const blockKeys = (e: KeyboardEvent) => {
-      // Block F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U, Ctrl+Shift+C
-      if (e.key === 'F12' ||
-        (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key)) ||
-        (e.ctrlKey && e.key === 'U')) {
+      if (
+        e.key === 'F12' ||
+        (e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes(e.key)) ||
+        (e.ctrlKey && e.key === 'U')
+      ) {
         e.preventDefault();
         toast.error('🚫 DevTools disabled!', { id: 'no-devtools' });
       }
     };
     document.addEventListener('paste', blockPaste, true);
-    document.addEventListener('contextmenu', blockContextMenu, true);
+    document.addEventListener('contextmenu', blockCtxMenu, true);
     document.addEventListener('keydown', blockKeys, true);
     return () => {
       document.removeEventListener('paste', blockPaste, true);
-      document.removeEventListener('contextmenu', blockContextMenu, true);
+      document.removeEventListener('contextmenu', blockCtxMenu, true);
       document.removeEventListener('keydown', blockKeys, true);
     };
   }, []);
-};
+}
 
-// ── Simulated test runner (runs in browser) ──
-const simulateRun = async (code: string, lang: string, testCases: { input: string; expectedOutput: string }[]) => {
-  // In a real app this would call a Judge0 API or similar
-  // For now we simulate with a realistic delay and random results based on code quality
-  await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
-  
-  const hasMainLogic = code.length > 100;
-  const runtime = Math.floor(50 + Math.random() * 300);
-  
-  if (!hasMainLogic) {
-    return { status: 'error' as const, output: 'Compilation Error: No meaningful code detected.', runtime: 0, passed: 0, total: testCases.length };
+// ── Real code execution via Piston API (free, no API key) ────────
+const PISTON_URL = 'https://emkc.org/api/v2/piston/execute';
+
+async function runCode(
+  code: string,
+  langId: LangId,
+  testCases: { input: string; expectedOutput: string }[],
+): Promise<RunResult> {
+  const opt = LANG_OPTIONS.find(l => l.id === langId)!;
+  const testDetails: RunResult['testDetails'] = [];
+  let passed = 0;
+  let totalRuntime = 0;
+
+  for (const tc of testCases) {
+    const start = Date.now();
+    try {
+      const res = await fetch(PISTON_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          language: opt.pistonLang,
+          version: opt.pistonVersion,
+          files: [{ name: langId === 'java' ? 'Main.java' : `solution.${langId === 'javascript' ? 'js' : langId}`, content: code }],
+          stdin: tc.input,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.json() as {
+        run: { stdout: string; stderr: string; code: number; signal: string | null };
+        compile?: { stdout: string; stderr: string; code: number };
+      };
+
+      totalRuntime += Date.now() - start;
+
+      // Check compile errors first
+      if (data.compile && data.compile.code !== 0 && data.compile.stderr) {
+        return {
+          status: 'error',
+          output: `Compilation Error:\n${data.compile.stderr}`,
+          runtime: Date.now() - start,
+          passed: 0,
+          total: testCases.length,
+          testDetails: [{ input: tc.input, expected: tc.expectedOutput, got: data.compile.stderr, passed: false }],
+        };
+      }
+
+      if (data.run.signal === 'SIGKILL') {
+        testDetails.push({ input: tc.input, expected: tc.expectedOutput, got: 'Time Limit Exceeded', passed: false });
+        continue;
+      }
+
+      if (data.run.code !== 0 && data.run.stderr) {
+        testDetails.push({ input: tc.input, expected: tc.expectedOutput, got: data.run.stderr.trim(), passed: false });
+        continue;
+      }
+
+      const got = data.run.stdout.trim();
+      const expected = tc.expectedOutput.trim();
+      const ok = got === expected;
+      if (ok) passed++;
+      testDetails.push({ input: tc.input, expected, got, passed: ok });
+    } catch {
+      totalRuntime += Date.now() - start;
+      testDetails.push({ input: tc.input, expected: tc.expectedOutput, got: 'Network error executing code', passed: false });
+    }
   }
-  
-  // Simulate passing test cases
-  const passed = Math.floor(testCases.length * (0.5 + Math.random() * 0.5));
-  const status = passed === testCases.length ? 'accepted' as const : 'wrong_answer' as const;
-  
-  const output = passed === testCases.length 
-    ? `✅ All ${testCases.length}/${testCases.length} test cases passed!\nRuntime: ${runtime}ms`
-    : `❌ ${passed}/${testCases.length} test cases passed.\nFailed on test case ${passed + 1}:\nExpected: ${testCases[passed]?.expectedOutput || 'N/A'}\nGot: Wrong output`;
-  
-  return { status, output, runtime, passed, total: testCases.length };
-};
 
+  const total = testCases.length;
+  const allPassed = passed === total;
+  const runtime = Math.round(totalRuntime / Math.max(testCases.length, 1));
+
+  let output: string;
+  if (allPassed) {
+    output = `✅ All ${total}/${total} test cases passed!\nAverage runtime: ${runtime}ms`;
+  } else {
+    const first = testDetails.find(t => !t.passed)!;
+    output = `❌ ${passed}/${total} test cases passed.\n\nFailed test case:\nInput:    ${first.input}\nExpected: ${first.expected}\nGot:      ${first.got || '(no output)'}`;
+  }
+
+  return {
+    status: allPassed ? 'accepted' : (testDetails.some(t => !t.passed && t.got.includes('Error')) ? 'error' : 'wrong_answer'),
+    output,
+    runtime,
+    passed,
+    total,
+    testDetails,
+  };
+}
+
+// ── Component ─────────────────────────────────────────────────────
 const ProblemPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorRef = useRef<any>(null);
-  
+  useAntiCheat(); // ← called once, no duplicate
+
+  // Per-language code cache: preserve user's code when switching languages
+  const codeCache = useRef<Partial<Record<LangId, string>>>({});
+
   const [problem, setProblem] = useState<Problem | null>(null);
   const [loading, setLoading] = useState(true);
-  const [lang, setLang] = useState<'java' | 'c' | 'python' | 'javascript'>('python');
+  const [lang, setLang] = useState<LangId>('python');
   const [code, setCode] = useState('');
   const [activeTab, setActiveTab] = useState<'description' | 'submissions' | 'comments'>('description');
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [runResult, setRunResult] = useState<any>(null);
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -117,8 +209,7 @@ const ProblemPage: React.FC = () => {
   const [problemLiked, setProblemLiked] = useState(false);
   const [problemDisliked, setProblemDisliked] = useState(false);
 
-  useAntiCheat(editorRef);
-
+  // Load problem from Firestore
   useEffect(() => {
     const load = async () => {
       if (!id) return;
@@ -127,16 +218,39 @@ const ProblemPage: React.FC = () => {
         if (!snap.exists()) { navigate('/problems'); return; }
         const p = { id: snap.id, ...snap.data() } as Problem;
         setProblem(p);
-        setCode(p.starterCode?.[lang] || '// Write your solution here\n');
+        // Seed codeCache with starter code for all languages
+        LANG_OPTIONS.forEach(l => {
+          if (!codeCache.current[l.id]) {
+            codeCache.current[l.id] = p.starterCode?.[l.id] || `// Write your ${l.label} solution here\n`;
+          }
+        });
+        setCode(codeCache.current['python'] || p.starterCode?.['python'] || '# Write your solution here\n');
       } catch (err) { console.error(err); }
       finally { setLoading(false); }
     };
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  useEffect(() => {
-    if (problem) setCode(problem.starterCode?.[lang] || `// Write your ${lang} solution here\n`);
-  }, [lang, problem]);
+  // Language switch: save current code to cache, restore cached code for new lang
+  const switchLang = useCallback((newLang: LangId) => {
+    // Save the current editor content before switching
+    codeCache.current[lang] = code;
+    // Restore cached code for the new language (or starter code)
+    const cached = codeCache.current[newLang];
+    const starter = problem?.starterCode?.[newLang] || `// Write your ${newLang} solution here\n`;
+    setCode(cached || starter);
+    setLang(newLang);
+    setRunResult(null); // clear previous result on lang change
+  }, [lang, code, problem]);
+
+  // Reset to starter code for current language
+  const resetCode = useCallback(() => {
+    const starter = problem?.starterCode?.[lang] || `// Write your ${lang} solution here\n`;
+    codeCache.current[lang] = starter;
+    setCode(starter);
+    toast.success('Code reset to starter template');
+  }, [problem, lang]);
 
   const loadComments = useCallback(async () => {
     if (!id) return;
@@ -155,15 +269,29 @@ const ProblemPage: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'comments') loadComments();
     if (activeTab === 'submissions') loadSubmissions();
-  }, [activeTab]);
+  }, [activeTab, loadComments, loadSubmissions]);
 
   const handleRun = async () => {
     if (!problem) return;
     setRunning(true);
     setRunResult(null);
+    const toastId = toast.loading('⚙️ Running your code...');
     try {
-      const result = await simulateRun(code, lang, problem.testCases?.slice(0, 3) || []);
+      // Run against visible examples as test cases
+      const visibleCases = (problem.examples || []).map(ex => ({
+        input: ex.input,
+        expectedOutput: ex.output,
+      }));
+      const cases = visibleCases.length > 0 ? visibleCases : (problem.testCases?.slice(0, 3) || []);
+      const result = await runCode(code, lang, cases);
       setRunResult(result);
+      toast.dismiss(toastId);
+      if (result.status === 'accepted') toast.success('✅ All visible tests passed!');
+      else if (result.status === 'wrong_answer') toast.error('❌ Wrong answer on some tests');
+      else toast.error('💥 Runtime/Compile error');
+    } catch {
+      toast.dismiss(toastId);
+      toast.error('Failed to run code. Check your connection.');
     } finally {
       setRunning(false);
     }
@@ -173,25 +301,25 @@ const ProblemPage: React.FC = () => {
     if (!user || !profile || !problem) { toast.error('Login to submit!'); navigate('/login'); return; }
     setSubmitting(true);
     setRunResult(null);
+    const toastId = toast.loading('🚀 Submitting against all test cases...');
     try {
-      const result = await simulateRun(code, lang, problem.testCases || []);
+      const result = await runCode(code, lang, problem.testCases || []);
       setRunResult(result);
-      
-      // Save submission
+      toast.dismiss(toastId);
+
       await addDoc(collection(db, 'submissions'), {
         userId: user.uid,
         userName: profile.displayName,
         problemId: id,
         problemTitle: problem.title,
         language: lang,
-        code, // In production, don't store raw code or encrypt it
+        code,
         status: result.status,
         runtime: result.runtime,
         score: result.status === 'accepted' ? Math.max(100 - result.runtime / 10, 10) : 0,
         createdAt: serverTimestamp(),
       });
 
-      // Update problem solved count & user stats
       if (result.status === 'accepted') {
         await updateDoc(doc(db, 'problems', id!), { solvedCount: increment(1) });
         await updateDoc(doc(db, 'users', user.uid), {
@@ -204,11 +332,16 @@ const ProblemPage: React.FC = () => {
         await updateDoc(doc(db, 'users', user.uid), { totalSubmissions: increment(1) });
         toast.error('Wrong Answer. Keep grinding! 💪');
       } else {
-        toast.error('Runtime Error. Debug your code!');
+        toast.error('Runtime/Compile Error. Debug your code!');
       }
       loadSubmissions();
-    } catch (err) { toast.error('Submission failed!'); console.error(err); }
-    finally { setSubmitting(false); }
+    } catch (err) {
+      toast.dismiss(toastId);
+      toast.error('Submission failed!');
+      console.error(err);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const postComment = async () => {
@@ -230,10 +363,10 @@ const ProblemPage: React.FC = () => {
     } finally { setPostingComment(false); }
   };
 
-  const toggleCommentLike = async (commentId: string, liked: boolean) => {
+  const toggleCommentLike = async (commentId: string, hasLiked: boolean) => {
     if (!user) { toast.error('Login to like!'); return; }
     const ref = doc(db, 'problems', id!, 'comments', commentId);
-    await updateDoc(ref, liked
+    await updateDoc(ref, hasLiked
       ? { likes: arrayRemove(user.uid), dislikes: arrayUnion(user.uid) }
       : { likes: arrayUnion(user.uid), dislikes: arrayRemove(user.uid) }
     );
@@ -254,14 +387,14 @@ const ProblemPage: React.FC = () => {
       setProblemDisliked(p => !p);
       setProblemLiked(false);
     }
-    // Reload problem
     const snap = await getDoc(doc(db, 'problems', id!));
     if (snap.exists()) setProblem({ id: snap.id, ...snap.data() } as Problem);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEditorMount = (editor: any, monaco: any) => {
     editorRef.current = editor;
-    // Add IntelliSense suggestions
+    // Block paste inside Monaco at the editor API level too
     editor.addAction({
       id: 'no-paste',
       label: 'Paste disabled',
@@ -287,7 +420,7 @@ const ProblemPage: React.FC = () => {
     <>
       <Navbar />
       <div className="problem-layout" style={{ marginTop: 64 }}>
-        {/* ── Left: Description/Comments/Submissions ── */}
+        {/* ── Left: Description / Comments / Submissions ── */}
         <div className="problem-desc-panel">
           {/* Problem Header */}
           <div style={{ marginBottom: 24 }}>
@@ -297,8 +430,6 @@ const ProblemPage: React.FC = () => {
               {problem.tags?.map(t => <span key={t} className="tag">{t}</span>)}
             </div>
             <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 12 }}>{problem.title}</h1>
-            
-            {/* Like/Dislike */}
             <div className="flex items-center gap-3">
               <button onClick={() => toggleProblemLike('like')} className="flex items-center gap-1" style={{ background: 'none', border: 'none', cursor: 'pointer', color: problemLiked ? 'var(--green)' : 'var(--text-2)', fontSize: 14, fontFamily: 'inherit' }}>
                 <ThumbsUp size={15} /> {problem.likes || 0}
@@ -312,17 +443,18 @@ const ProblemPage: React.FC = () => {
 
           {/* Tabs */}
           <div className="tabs" style={{ marginBottom: 24 }}>
-            {[{id: 'description', label: 'Description', icon: <BookOpen size={14} />},
-              {id: 'submissions', label: 'Submissions', icon: <Trophy size={14} />},
-              {id: 'comments', label: `Comments`, icon: <MessageCircle size={14} />},
+            {[
+              { id: 'description', label: 'Description', icon: <BookOpen size={14} /> },
+              { id: 'submissions', label: 'Submissions', icon: <Trophy size={14} /> },
+              { id: 'comments',    label: 'Comments',    icon: <MessageCircle size={14} /> },
             ].map(t => (
-              <button key={t.id} className={`tab ${activeTab === t.id ? 'active' : ''}`} onClick={() => setActiveTab(t.id as any)}>
+              <button key={t.id} className={`tab ${activeTab === t.id ? 'active' : ''}`} onClick={() => setActiveTab(t.id as typeof activeTab)}>
                 {t.icon} {t.label}
               </button>
             ))}
           </div>
 
-          {/* Tab Content */}
+          {/* Description tab */}
           {activeTab === 'description' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div>
@@ -366,6 +498,7 @@ const ProblemPage: React.FC = () => {
             </div>
           )}
 
+          {/* Submissions tab */}
           {activeTab === 'submissions' && (
             <div>
               {submissions.length === 0 ? (
@@ -399,18 +532,17 @@ const ProblemPage: React.FC = () => {
             </div>
           )}
 
+          {/* Comments tab */}
           {activeTab === 'comments' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Add comment */}
-              {user && (
+              {user ? (
                 <div className="glass-card" style={{ padding: 16 }}>
                   <textarea className="input" style={{ marginBottom: 10 }} placeholder="Share your approach, hint, or feedback... 💬" rows={3} value={newComment} onChange={e => setNewComment(e.target.value)} />
                   <button className="btn btn-primary btn-sm" onClick={postComment} disabled={postingComment || !newComment.trim()}>
                     {postingComment ? <Loader2 size={14} className="animate-spin" /> : null} Post Comment
                   </button>
                 </div>
-              )}
-              {!user && (
+              ) : (
                 <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-3)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
                   <a href="/login" style={{ color: 'var(--purple-light)' }}>Login</a> to join the discussion!
                 </div>
@@ -426,10 +558,10 @@ const ProblemPage: React.FC = () => {
                       </div>
                       <p style={{ color: 'var(--text-2)', lineHeight: 1.7, fontSize: 14 }}>{c.text}</p>
                       <div className="flex gap-3 items-center" style={{ marginTop: 10 }}>
-                        <button onClick={() => toggleCommentLike(c.id, c.likes?.includes(user?.uid || ''))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.likes?.includes(user?.uid || '') ? 'var(--green)' : 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, fontFamily: 'inherit' }}>
+                        <button onClick={() => toggleCommentLike(c.id, c.likes?.includes(user?.uid ?? ''))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.likes?.includes(user?.uid ?? '') ? 'var(--green)' : 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, fontFamily: 'inherit' }}>
                           <ThumbsUp size={13} /> {c.likes?.length || 0}
                         </button>
-                        <button onClick={() => toggleCommentLike(c.id, !c.dislikes?.includes(user?.uid || ''))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.dislikes?.includes(user?.uid || '') ? 'var(--red)' : 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, fontFamily: 'inherit' }}>
+                        <button onClick={() => toggleCommentLike(c.id, c.dislikes?.includes(user?.uid ?? ''))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.dislikes?.includes(user?.uid ?? '') ? 'var(--red)' : 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, fontFamily: 'inherit' }}>
                           <ThumbsDown size={13} /> {c.dislikes?.length || 0}
                         </button>
                       </div>
@@ -445,14 +577,32 @@ const ProblemPage: React.FC = () => {
         <div className="problem-code-panel">
           {/* Editor Top Bar */}
           <div className="editor-topbar">
+            {/* Language switcher */}
             <div className="flex gap-2 items-center">
               {LANG_OPTIONS.map(l => (
-                <button key={l.id} onClick={() => setLang(l.id as any)} className={`lang-badge lang-${l.id} ${lang === l.id ? '' : 'btn-ghost'}`} style={{ cursor: 'pointer', border: lang === l.id ? undefined : '1px solid var(--border)', background: lang === l.id ? undefined : 'transparent', color: lang === l.id ? undefined : 'var(--text-3)', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>
+                <button
+                  key={l.id}
+                  onClick={() => switchLang(l.id)}
+                  className={`lang-badge lang-${l.id}`}
+                  style={{
+                    cursor: 'pointer',
+                    border: lang === l.id ? undefined : '1px solid var(--border)',
+                    background: lang === l.id ? undefined : 'transparent',
+                    color: lang === l.id ? undefined : 'var(--text-3)',
+                    borderRadius: 6, padding: '4px 10px', fontSize: 12,
+                    fontFamily: 'JetBrains Mono, monospace', fontWeight: 700,
+                    transition: 'all 0.15s',
+                  }}
+                >
                   {l.label}
                 </button>
               ))}
             </div>
-            <div className="flex gap-2">
+            {/* Actions */}
+            <div className="flex gap-2 items-center">
+              <button title="Reset to starter code" className="btn btn-ghost btn-sm" onClick={resetCode} style={{ padding: '4px 8px' }}>
+                <RotateCcw size={13} />
+              </button>
               <button className="btn btn-ghost btn-sm" onClick={handleRun} disabled={running || submitting}>
                 {running ? <Loader2 size={14} style={{ animation: 'spin-slow 0.8s linear infinite' }} /> : <Play size={14} />}
                 Run
@@ -468,7 +618,7 @@ const ProblemPage: React.FC = () => {
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <Editor
               height="100%"
-              language={lang === 'c' ? 'c' : lang}
+              language={lang}
               value={code}
               onChange={v => setCode(v || '')}
               onMount={handleEditorMount}
@@ -492,13 +642,17 @@ const ProblemPage: React.FC = () => {
                 smoothScrolling: true,
                 cursorBlinking: 'smooth',
                 cursorSmoothCaretAnimation: 'on',
+                // Performance: disable expensive features
+                codeLens: false,
+                folding: true,
+                renderWhitespace: 'none',
               }}
             />
           </div>
 
           {/* Output Panel */}
           {runResult && (
-            <div style={{ padding: 16, borderTop: '1px solid var(--border)', background: 'rgba(5,5,15,0.9)' }}>
+            <div style={{ padding: 16, borderTop: '1px solid var(--border)', background: 'rgba(5,5,15,0.9)', maxHeight: 280, overflowY: 'auto' }}>
               <div className="flex items-center gap-2" style={{ marginBottom: 10 }}>
                 <Terminal size={14} color="var(--purple-light)" />
                 <span style={{ fontSize: 13, fontWeight: 600 }}>Output</span>
@@ -508,13 +662,42 @@ const ProblemPage: React.FC = () => {
                   ? <span className="badge badge-red" style={{ fontSize: 10 }}>✗ Wrong Answer</span>
                   : <span className="badge badge-yellow" style={{ fontSize: 10 }}>! Error</span>
                 }
-                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--cyan)' }}><Clock size={12} style={{ verticalAlign: 'middle' }} /> {runResult.runtime}ms</span>
+                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--cyan)' }}>
+                  <Clock size={12} style={{ verticalAlign: 'middle' }} /> {runResult.runtime}ms
+                </span>
               </div>
-              <div className="terminal" style={{ fontSize: 12, maxHeight: 120, overflowY: 'auto' }}>
+              {/* Summary line */}
+              <div className="terminal" style={{ fontSize: 12, marginBottom: 8 }}>
                 <span className={runResult.status === 'accepted' ? 'success' : 'error'}>
                   {runResult.output}
                 </span>
               </div>
+              {/* Per-test-case breakdown */}
+              {runResult.testDetails.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                  {runResult.testDetails.map((t, i) => (
+                    <div key={i} style={{
+                      border: `1px solid ${t.passed ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                      borderRadius: 6, padding: '8px 12px', fontSize: 12,
+                      background: t.passed ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
+                    }}>
+                      <div className="flex items-center gap-2" style={{ marginBottom: t.passed ? 0 : 4 }}>
+                        {t.passed ? <CheckCircle2 size={12} color="var(--green)" /> : <XCircle size={12} color="var(--red)" />}
+                        <span style={{ fontWeight: 600, color: t.passed ? 'var(--green)' : 'var(--red)' }}>
+                          Test {i + 1}: {t.passed ? 'Passed' : 'Failed'}
+                        </span>
+                      </div>
+                      {!t.passed && (
+                        <div style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-2)', marginTop: 4 }}>
+                          <div>Input: <span style={{ color: 'var(--text-1)' }}>{t.input}</span></div>
+                          <div>Expected: <span style={{ color: 'var(--green)' }}>{t.expected}</span></div>
+                          <div>Got: <span style={{ color: 'var(--red)' }}>{t.got || '(no output)'}</span></div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Zap, Code2, Trophy, Users, ChevronRight, Terminal, Star, ArrowRight } from 'lucide-react';
+import { Zap, Code2, Trophy, Users, Terminal, Star, ArrowRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 // Matrix rain canvas effect

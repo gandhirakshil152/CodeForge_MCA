@@ -2,14 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   collection, getDocs, query, orderBy, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, getDoc
+  doc, serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import Navbar from '../components/Navbar';
 import {
   Shield, Plus, Trash2, Edit3, Users, BookOpen, BarChart2,
-  ChevronDown, ChevronUp, Save, X, AlertTriangle, UserCheck, UserX, Loader2
+  Save, X, AlertTriangle, UserCheck, UserX, Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { Problem } from './ProblemsPage';
@@ -41,9 +41,21 @@ const rl = readline.createInterface({ input: process.stdin });
 `,
 };
 
-const EMPTY_PROBLEM = {
+const EMPTY_PROBLEM: {
+  title: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  category: string;
+  tags: string;
+  description: string;
+  inputFormat: string;
+  outputFormat: string;
+  constraints: string;
+  examples: { input: string; output: string; explanation: string }[];
+  testCases: { input: string; expectedOutput: string }[];
+  starterCode: Problem['starterCode'];
+} = {
   title: '',
-  difficulty: 'easy' as const,
+  difficulty: 'easy',
   category: 'Arrays',
   tags: '',
   description: '',
@@ -56,7 +68,7 @@ const EMPTY_PROBLEM = {
 };
 
 const AdminPage: React.FC = () => {
-  const { user, profile, isAdmin, isSuperAdmin } = useAuth();
+  const { profile, isAdmin, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
   const [tab, setTab] = useState<AdminTab>('problems');
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -66,7 +78,6 @@ const AdminPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...EMPTY_PROBLEM });
   const [saving, setSaving] = useState(false);
-  const [expandedProblem, setExpandedProblem] = useState<string | null>(null);
   const [stats, setStats] = useState({ totalUsers: 0, totalSubmissions: 0, totalProblems: 0, acceptedSubmissions: 0 });
 
   useEffect(() => {
@@ -108,7 +119,9 @@ const AdminPage: React.FC = () => {
       inputFormat: p.inputFormat || '',
       outputFormat: p.outputFormat || '',
       constraints: p.constraints || '',
-      examples: p.examples?.length ? p.examples : [{ input: '', output: '', explanation: '' }],
+      examples: p.examples?.length
+        ? p.examples.map(e => ({ input: e.input, output: e.output, explanation: e.explanation ?? '' }))
+        : [{ input: '', output: '', explanation: '' }],
       testCases: p.testCases?.length ? p.testCases : [{ input: '', expectedOutput: '' }],
       starterCode: p.starterCode || { ...DEFAULT_STARTER },
     });

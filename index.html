@@ -2,35 +2,34 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Primary meta -->
     <title>CodeForge MCA — Practice. Compete. Conquer.</title>
     <meta name="description" content="The ultimate coding practice platform for MCA students. Practice HackerRank-style problems in Java, C, Python, and JavaScript. Climb the leaderboard and ace your placements." />
-    <meta name="keywords" content="MCA coding, placement prep, Java, Python, C, JavaScript, competitive programming, leaderboard" />
+    <meta name="keywords" content="MCA coding, placement prep, Java, Python, C, JavaScript, competitive programming, leaderboard, CodeForge" />
     <meta name="author" content="CodeForge MCA" />
-    <!-- Open Graph -->
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph / social -->
     <meta property="og:title" content="CodeForge MCA — Practice. Compete. Conquer." />
-    <meta property="og:description" content="The ultimate coding practice platform for MCA students." />
+    <meta property="og:description" content="The ultimate coding practice platform for MCA students. Practice, compete, and land your dream placement." />
     <meta property="og:type" content="website" />
-    <!-- Prevent DevTools access via right-click -->
+    <meta property="og:site_name" content="CodeForge MCA" />
+
+    <!-- Anti-paste / editor protection for the Monaco editor only.
+         Note: we intentionally do NOT block the global right-click because it
+         breaks accessibility and is easily circumvented anyway. The real
+         anti-cheat logic lives in the ProblemPage component. -->
     <script>
-      // Additional anti-inspect protection
-      document.addEventListener('contextmenu', function(e) {
-        if (e.target.closest && e.target.closest('.monaco-editor')) {
-          e.preventDefault();
-        }
-      });
-      // Detect devtools opening
-      (function() {
-        const threshold = 160;
-        setInterval(() => {
-          if (window.outerWidth - window.innerWidth > threshold ||
-              window.outerHeight - window.innerHeight > threshold) {
-            document.title = '⚠️ DevTools Detected!';
-          } else {
-            document.title = 'CodeForge MCA';
+      (function () {
+        // Disable right-click only inside Monaco editor iframes
+        document.addEventListener('contextmenu', function (e) {
+          if (e.target && e.target.closest && e.target.closest('.monaco-editor')) {
+            e.preventDefault();
           }
-        }, 1000);
+        });
       })();
     </script>
   </head>

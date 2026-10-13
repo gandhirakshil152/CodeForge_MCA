@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut, 
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
   onAuthStateChanged,
   updateProfile,
 } from 'firebase/auth';
@@ -19,7 +19,7 @@ export interface UserProfile {
   problemsSolved: number;
   totalSubmissions: number;
   score: number;
-  createdAt: any;
+  createdAt: unknown;
   avatar?: string;
 }
 
@@ -37,20 +37,19 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const SUPER_ADMIN_EMAIL = 'gandhirakshil190@gmail.com';
+// Super admin email is configured via environment variable so it is never
+// hard-coded in source and can differ across environments without a code change.
+const SUPER_ADMIN_EMAIL = import.meta.env.VITE_SUPER_ADMIN_EMAIL as string | undefined;
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser]       = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (u: User): Promise<UserProfile | null> => {
-    const ref = doc(db, 'users', u.uid);
+    const ref  = doc(db, 'users', u.uid);
     const snap = await getDoc(ref);
-    if (snap.exists()) {
-      return snap.data() as UserProfile;
-    }
-    return null;
+    return snap.exists() ? (snap.data() as UserProfile) : null;
   };
 
   const refreshProfile = async () => {
@@ -81,9 +80,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const register = async (email: string, password: string, name: string) => {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(cred.user, { displayName: name });
-    
-    const role = email === SUPER_ADMIN_EMAIL ? 'superadmin' : 'student';
-    
+
+    const role: UserProfile['role'] =
+      SUPER_ADMIN_EMAIL && email === SUPER_ADMIN_EMAIL ? 'superadmin' : 'student';
+
     const newProfile: UserProfile = {
       uid: cred.user.uid,
       email,
@@ -95,7 +95,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       score: 0,
       createdAt: serverTimestamp(),
     };
-    
+
     await setDoc(doc(db, 'users', cred.user.uid), newProfile);
     setProfile(newProfile);
   };
@@ -105,11 +105,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(null);
   };
 
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+  const isAdmin      = profile?.role === 'admin' || profile?.role === 'superadmin';
   const isSuperAdmin = profile?.role === 'superadmin';
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, login, register, logout, isAdmin, isSuperAdmin, refreshProfile }}>
+    <AuthContext.Provider
+      value={{ user, profile, loading, login, register, logout, isAdmin, isSuperAdmin, refreshProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );

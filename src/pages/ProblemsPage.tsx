@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, Filter, CheckCircle2, Circle, Code2, Clock, Star } from 'lucide-react';
+import { Search, CheckCircle2, Circle, Code2 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 
 export interface Problem {
@@ -30,7 +30,7 @@ const DIFFICULTIES = ['All', 'easy', 'medium', 'hard'];
 const CATEGORIES = ['All', 'Arrays', 'Strings', 'Math', 'Sorting', 'Dynamic Programming', 'Graphs', 'Trees', 'Recursion'];
 
 const ProblemsPage: React.FC = () => {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [problems, setProblems] = useState<Problem[]>([]);
   const [loading, setLoading] = useState(true);

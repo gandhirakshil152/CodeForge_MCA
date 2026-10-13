@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Code2, Trophy, BookOpen, LayoutDashboard, LogOut, User, Shield, Menu, X, Zap } from 'lucide-react';
+import { Trophy, BookOpen, LayoutDashboard, LogOut, Shield, Zap } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 const Navbar: React.FC = () => {
   const { user, profile, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {

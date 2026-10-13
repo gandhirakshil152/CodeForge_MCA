@@ -2,17 +2,19 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
+// Config is loaded from environment variables (VITE_ prefix exposes them to the browser).
+// Copy .env to .env.local for local development — .env.local is git-ignored.
 const firebaseConfig = {
-  apiKey: "AIzaSyCUB3IgvC8SLTe0LLNNrMpm1fpUnHzA60M",
-  authDomain: "codeforge-mca.firebaseapp.com",
-  projectId: "codeforge-mca",
-  storageBucket: "codeforge-mca.firebasestorage.app",
-  messagingSenderId: "735892442838",
-  appId: "1:735892442838:web:29a48f5844690d5ba10377",
-  measurementId: "G-19GBHCB2H1"
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY            as string,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN        as string,
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID         as string,
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET     as string,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string,
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID             as string,
+  measurementId:     import.meta.env.VITE_FIREBASE_MEASUREMENT_ID     as string,
 };
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db   = getFirestore(app);
 export default app;

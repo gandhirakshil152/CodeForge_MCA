@@ -3,7 +3,7 @@ import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import Navbar from '../components/Navbar';
-import { Trophy, Code2, Target, Clock, CheckCircle2, XCircle, Star, TrendingUp, Award } from 'lucide-react';
+import { Trophy, Code2, Target, Clock, CheckCircle2, XCircle, Star } from 'lucide-react';
 
 const LANG_COLORS: Record<string, string> = { java: 'lang-java', c: 'lang-c', python: 'lang-python', javascript: 'lang-js' };
 
@@ -33,7 +33,7 @@ const ProfilePage: React.FC = () => {
   const accuracy = submissions.length > 0 ? Math.round((accepted.length / submissions.length) * 100) : 0;
   const avgRuntime = accepted.length > 0 ? Math.round(accepted.reduce((a, s) => a + s.runtime, 0) / accepted.length) : 0;
   const langCounts = submissions.reduce((acc, s) => { acc[s.language] = (acc[s.language] || 0) + 1; return acc; }, {} as Record<string, number>);
-  const favLang = Object.entries(langCounts).sort(([,a],[,b]) => b - a)[0]?.[0] || 'None';
+  const favLang = Object.entries(langCounts).sort(([, countA], [, countB]) => (countB as number) - (countA as number))[0]?.[0] || 'None';
 
   return (
     <>
