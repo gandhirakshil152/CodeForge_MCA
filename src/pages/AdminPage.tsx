@@ -17,27 +17,40 @@ import type { Problem } from './ProblemsPage';
 type AdminTab = 'problems' | 'users' | 'stats';
 
 // ── Default starter code templates
+// IMPORTANT: Java class MUST be named 'Main' — Judge0 CE compiles as Main.java
 const DEFAULT_STARTER: Problem['starterCode'] = {
   java: `import java.util.Scanner;
 
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         // Write your solution here
+        // Example: int n = sc.nextInt();
+        //          System.out.println(n);
     }
 }`,
   c: `#include <stdio.h>
+#include <string.h>
 
 int main() {
     // Write your solution here
+    // Example: int n; scanf("%d", &n); printf("%d\\n", n);
     return 0;
 }`,
-  python: `# Write your solution here
-n = int(input())
+  python: `import sys
+input = sys.stdin.readline
+
+# Write your solution here
+# Example: n = int(input())
+#          print(n)
 `,
-  javascript: `const readline = require('readline');
-const rl = readline.createInterface({ input: process.stdin });
+  javascript: `const lines = require('fs').readFileSync('/dev/stdin', 'utf8').split('\\n');
+let idx = 0;
+const input = () => lines[idx++]?.trim() ?? '';
+
 // Write your solution here
+// Example: const n = parseInt(input());
+//          console.log(n);
 `,
 };
 

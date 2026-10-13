@@ -24,7 +24,7 @@ export const SEED_PROBLEMS: SeedProblem[] = [
     ],
     starterCode: {
       java: `import java.util.*;
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         int n = sc.nextInt(), target = sc.nextInt();
@@ -100,7 +100,7 @@ for (let i = 0; i < nums.length; i++) {
     ],
     starterCode: {
       java: `import java.util.Scanner;
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         String s = sc.nextLine();
@@ -158,7 +158,7 @@ console.log(result);`
     ],
     starterCode: {
       java: `import java.util.Scanner;
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         int n = sc.nextInt();
@@ -218,7 +218,7 @@ console.log(res.join(' '));`
     ],
     starterCode: {
       java: `import java.util.Scanner;
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         String s = sc.nextLine().toLowerCase().replaceAll("[^a-z0-9]", "");
@@ -271,7 +271,7 @@ console.log(s === s.split('').reverse().join('') ? 'YES' : 'NO');`
     ],
     starterCode: {
       java: `import java.util.Scanner;
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         int n = sc.nextInt();
@@ -336,7 +336,7 @@ console.log(max);`
     ],
     starterCode: {
       java: `import java.util.Scanner;
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         int n = sc.nextInt(), target = sc.nextInt();
@@ -412,7 +412,7 @@ console.log(-1);`
     ],
     starterCode: {
       java: `import java.util.*;
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         String s = sc.nextLine();
@@ -464,7 +464,7 @@ Object.keys(freq).sort().forEach(c => console.log(c, freq[c]));`
     ],
     starterCode: {
       java: `import java.util.*;
-public class Solution {
+public class Main {
     static class Node { int val; Node next; Node(int v){val=v;} }
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
@@ -526,7 +526,7 @@ console.log(arr.reverse().join(' '));`
     ],
     starterCode: {
       java: `import java.util.*;
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         int n = sc.nextInt();
@@ -587,7 +587,7 @@ console.log(Array.from({length:n-1},(_,i)=>i+2).filter(i=>sieve[i]).join(' '));`
     ],
     starterCode: {
       java: `import java.util.*;
-public class Solution {
+public class Main {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         int q = sc.nextInt(); sc.nextLine();

@@ -33,10 +33,11 @@ const JUDGE0_LANG_ID: Record<LangId, number> = {
   javascript: 63,   // JavaScript (Node.js 12.14.0)
 };
 
-// Java source must be in a class named 'Solution'
-const JAVA_CLASS_REGEX = /public\s+class\s+(\w+)/;
+// Judge0 CE compiles Java as "Main.java" and runs "java Main".
+// Whatever class name the user types, we must rename it to Main.
+const JAVA_CLASS_REGEX = /public\s+class\s+\w+/g;
 function normaliseJavaClassName(code: string): string {
-  return code.replace(JAVA_CLASS_REGEX, 'public class Solution');
+  return code.replace(JAVA_CLASS_REGEX, 'public class Main');
 }
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -134,36 +135,45 @@ async function submitToJudge0(
   langId: LangId,
   stdin: string,
 ): Promise<Judge0Response> {
-  // Normalise Java class name to 'Solution' (Judge0 compiles the file as-is)
+  // Judge0 CE compiles Java as Main.java — class MUST be named Main
   const src = langId === 'java' ? normaliseJavaClassName(sourceCode) : sourceCode;
 
-  // Submit
-  const submitRes = await fetch(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=false`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({
-      source_code: src,
-      language_id: JUDGE0_LANG_ID[langId],
-      stdin,
-      cpu_time_limit: 5,       // seconds
-      memory_limit: 128000,    // KB
-    }),
-  });
-  if (!submitRes.ok) throw new Error(`Judge0 submit failed: HTTP ${submitRes.status}`);
-  const { token } = await submitRes.json() as { token: string };
+  // 30-second timeout so the UI never hangs indefinitely
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 30_000);
 
-  // Poll until status.id > 2  (1=In Queue, 2=Processing, 3+=done)
-  for (let attempt = 0; attempt < 20; attempt++) {
-    await new Promise(r => setTimeout(r, 800));
-    const pollRes = await fetch(
-      `${JUDGE0_URL}/submissions/${token}?base64_encoded=false`,
-      { headers: { 'Accept': 'application/json' } },
+  try {
+    // Use wait=true — single request, Judge0 waits and returns the final result.
+    // No polling loop needed; simpler and more reliable.
+    const res = await fetch(
+      `${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          source_code: src,
+          language_id: JUDGE0_LANG_ID[langId],
+          stdin,
+          cpu_time_limit: 5,      // seconds
+          wall_time_limit: 10,    // hard wall-clock limit
+          memory_limit: 128_000,  // KB
+        }),
+      },
     );
-    if (!pollRes.ok) continue;
-    const result = await pollRes.json() as Judge0Response;
-    if (result.status.id > 2) return result; // Done
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Judge0 returned HTTP ${res.status}${text ? ': ' + text.slice(0, 120) : ''}`);
+    }
+
+    return res.json() as Promise<Judge0Response>;
+  } finally {
+    clearTimeout(tid);
   }
-  throw new Error('Timed out waiting for Judge0 result');
 }
 
 async function runCode(
