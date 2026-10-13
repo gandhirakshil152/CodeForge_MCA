@@ -18,12 +18,26 @@ import type { Problem } from './ProblemsPage';
 // ── Language options ──────────────────────────────────────────────
 type LangId = 'java' | 'c' | 'python' | 'javascript';
 
-const LANG_OPTIONS: { id: LangId; label: string; pistonLang: string; pistonVersion: string }[] = [
-  { id: 'java',       label: 'Java',       pistonLang: 'java',       pistonVersion: '15.0.2'  },
-  { id: 'c',         label: 'C',          pistonLang: 'c',          pistonVersion: '10.2.0'  },
-  { id: 'python',    label: 'Python',     pistonLang: 'python',     pistonVersion: '3.10.0'  },
-  { id: 'javascript',label: 'JavaScript', pistonLang: 'javascript', pistonVersion: '18.15.0' },
+const LANG_OPTIONS: { id: LangId; label: string }[] = [
+  { id: 'java',        label: 'Java'       },
+  { id: 'c',           label: 'C'          },
+  { id: 'python',      label: 'Python'     },
+  { id: 'javascript',  label: 'JavaScript' },
 ];
+
+// Judge0 CE language IDs (https://ce.judge0.com)
+const JUDGE0_LANG_ID: Record<LangId, number> = {
+  c:          50,   // C  (GCC 9.2.0)
+  java:       62,   // Java (OpenJDK 13.0.1)
+  python:     71,   // Python (3.8.1)
+  javascript: 63,   // JavaScript (Node.js 12.14.0)
+};
+
+// Java source must be in a class named 'Solution'
+const JAVA_CLASS_REGEX = /public\s+class\s+(\w+)/;
+function normaliseJavaClassName(code: string): string {
+  return code.replace(JAVA_CLASS_REGEX, 'public class Solution');
+}
 
 // ── Types ─────────────────────────────────────────────────────────
 interface Comment {
@@ -90,15 +104,73 @@ function useAntiCheat() {
   }, []);
 }
 
-// ── Real code execution via Piston API (free, no API key) ────────
-const PISTON_URL = 'https://emkc.org/api/v2/piston/execute';
+// ── Real code execution via Judge0 CE (free public instance) ─────
+// Judge0 CE community instance — CORS-enabled, no API key required.
+const JUDGE0_URL = 'https://ce.judge0.com';
+
+/** Normalise output for comparison: trim, collapse \r\n → \n, strip trailing blanks per line */
+function normaliseOutput(s: string): string {
+  return s
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map(l => l.trimEnd())
+    .join('\n')
+    .trim();
+}
+
+interface Judge0Response {
+  token?: string;
+  stdout: string | null;
+  stderr: string | null;
+  compile_output: string | null;
+  status: { id: number; description: string };
+  time: string | null;
+  memory: number | null;
+}
+
+async function submitToJudge0(
+  sourceCode: string,
+  langId: LangId,
+  stdin: string,
+): Promise<Judge0Response> {
+  // Normalise Java class name to 'Solution' (Judge0 compiles the file as-is)
+  const src = langId === 'java' ? normaliseJavaClassName(sourceCode) : sourceCode;
+
+  // Submit
+  const submitRes = await fetch(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=false`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({
+      source_code: src,
+      language_id: JUDGE0_LANG_ID[langId],
+      stdin,
+      cpu_time_limit: 5,       // seconds
+      memory_limit: 128000,    // KB
+    }),
+  });
+  if (!submitRes.ok) throw new Error(`Judge0 submit failed: HTTP ${submitRes.status}`);
+  const { token } = await submitRes.json() as { token: string };
+
+  // Poll until status.id > 2  (1=In Queue, 2=Processing, 3+=done)
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise(r => setTimeout(r, 800));
+    const pollRes = await fetch(
+      `${JUDGE0_URL}/submissions/${token}?base64_encoded=false`,
+      { headers: { 'Accept': 'application/json' } },
+    );
+    if (!pollRes.ok) continue;
+    const result = await pollRes.json() as Judge0Response;
+    if (result.status.id > 2) return result; // Done
+  }
+  throw new Error('Timed out waiting for Judge0 result');
+}
 
 async function runCode(
   code: string,
   langId: LangId,
   testCases: { input: string; expectedOutput: string }[],
 ): Promise<RunResult> {
-  const opt = LANG_OPTIONS.find(l => l.id === langId)!;
   const testDetails: RunResult['testDetails'] = [];
   let passed = 0;
   let totalRuntime = 0;
@@ -106,73 +178,57 @@ async function runCode(
   for (const tc of testCases) {
     const start = Date.now();
     try {
-      const res = await fetch(PISTON_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          language: opt.pistonLang,
-          version: opt.pistonVersion,
-          files: [{ name: langId === 'java' ? 'Main.java' : `solution.${langId === 'javascript' ? 'js' : langId}`, content: code }],
-          stdin: tc.input,
-        }),
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const data = await res.json() as {
-        run: { stdout: string; stderr: string; code: number; signal: string | null };
-        compile?: { stdout: string; stderr: string; code: number };
-      };
-
+      const result = await submitToJudge0(code, langId, tc.input);
       totalRuntime += Date.now() - start;
 
-      // Check compile errors first
-      if (data.compile && data.compile.code !== 0 && data.compile.stderr) {
+      const statusId = result.status.id;
+
+      // Compile Error (statusId = 6)
+      if (statusId === 6) {
+        const errMsg = result.compile_output?.trim() || result.stderr?.trim() || 'Compilation Error';
         return {
           status: 'error',
-          output: `Compilation Error:\n${data.compile.stderr}`,
-          runtime: Date.now() - start,
+          output: `Compilation Error:\n${errMsg}`,
+          runtime: 0,
           passed: 0,
           total: testCases.length,
-          testDetails: [{ input: tc.input, expected: tc.expectedOutput, got: data.compile.stderr, passed: false }],
+          testDetails: [{ input: tc.input, expected: tc.expectedOutput, got: errMsg, passed: false }],
         };
       }
 
-      if (data.run.signal === 'SIGKILL') {
-        testDetails.push({ input: tc.input, expected: tc.expectedOutput, got: 'Time Limit Exceeded', passed: false });
+      // Runtime errors (statusId 7=TLE, 8=MLE, 9=OLE, 10=RE, 11=Internal, 12=Exec Format)
+      if (statusId !== 3) {
+        const errMsg = result.stderr?.trim() || result.status.description;
+        testDetails.push({ input: tc.input, expected: normaliseOutput(tc.expectedOutput), got: errMsg, passed: false });
         continue;
       }
 
-      if (data.run.code !== 0 && data.run.stderr) {
-        testDetails.push({ input: tc.input, expected: tc.expectedOutput, got: data.run.stderr.trim(), passed: false });
-        continue;
-      }
-
-      const got = data.run.stdout.trim();
-      const expected = tc.expectedOutput.trim();
+      // Accepted run (statusId = 3) — compare stdout
+      const got = normaliseOutput(result.stdout || '');
+      const expected = normaliseOutput(tc.expectedOutput);
       const ok = got === expected;
       if (ok) passed++;
-      testDetails.push({ input: tc.input, expected, got, passed: ok });
-    } catch {
+      testDetails.push({ input: tc.input, expected, got: got || '(no output)', passed: ok });
+
+    } catch (err) {
       totalRuntime += Date.now() - start;
-      testDetails.push({ input: tc.input, expected: tc.expectedOutput, got: 'Network error executing code', passed: false });
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      testDetails.push({ input: tc.input, expected: tc.expectedOutput, got: `⚠️ ${msg}`, passed: false });
     }
   }
 
   const total = testCases.length;
   const allPassed = passed === total;
-  const runtime = Math.round(totalRuntime / Math.max(testCases.length, 1));
+  const runtime = Math.round(totalRuntime / Math.max(total, 1));
 
-  let output: string;
-  if (allPassed) {
-    output = `✅ All ${total}/${total} test cases passed!\nAverage runtime: ${runtime}ms`;
-  } else {
-    const first = testDetails.find(t => !t.passed)!;
-    output = `❌ ${passed}/${total} test cases passed.\n\nFailed test case:\nInput:    ${first.input}\nExpected: ${first.expected}\nGot:      ${first.got || '(no output)'}`;
-  }
+  const firstFail = testDetails.find(t => !t.passed);
+  const output = allPassed
+    ? `✅ All ${total}/${total} test cases passed!  Runtime: ~${runtime}ms`
+    : `❌ ${passed}/${total} test cases passed.\n\nFailed on:\nInput:    ${firstFail?.input}\nExpected: ${firstFail?.expected}\nGot:      ${firstFail?.got || '(no output)'}`;
 
+  const hasError = testDetails.some(t => !t.passed && (t.got.startsWith('⚠️') || t.got.includes('Error')));
   return {
-    status: allPassed ? 'accepted' : (testDetails.some(t => !t.passed && t.got.includes('Error')) ? 'error' : 'wrong_answer'),
+    status: allPassed ? 'accepted' : (hasError ? 'error' : 'wrong_answer'),
     output,
     runtime,
     passed,
