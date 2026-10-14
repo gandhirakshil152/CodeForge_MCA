@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import {
   collection, getDocs, query, orderBy, addDoc, serverTimestamp,
-  doc, updateDoc, increment,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
@@ -9,8 +8,8 @@ import Navbar from "../components/Navbar";
 import {
   Database, Search, ChevronDown, ChevronUp,
   Lightbulb, Table2, Code2, BookOpen,
-  CheckCircle2, Send, XCircle,
-  Lock,
+  CheckCircle2, Send, Clock,
+  Lock, ShieldOff,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -21,7 +20,7 @@ interface DbmsQuestion {
   difficulty: "easy" | "medium" | "hard";
   type: "query" | "theory" | "normalization" | "design";
   description: string; hint?: string; sampleSchema?: string;
-  expectedQuery?: string; expectedOutput?: string; explanation?: string;
+  expectedQuery?: string; explanation?: string;
   tableData?: TableDef[]; addedBy?: string;
 }
 
@@ -34,15 +33,6 @@ const typeColor = (t: string) =>
 const TOPICS = ["All","SQL Basics","Joins","Subqueries","Aggregation","Normalization",
   "Indexing","Transactions","Stored Procedures","Views","ER Diagrams","Keys & Constraints","Other"];
 
-const normalizeOutput = (s: string) =>
-  s.trim().toLowerCase()
-   .replace(/\r\n/g, "\n")
-   .replace(/[ \t]+/g, " ")
-   .replace(/ *\| */g, "|")
-   .replace(/\n+/g, "\n")
-   .replace(/^[-|+ \t]+$/gm, "")
-   .split("\n").map(l => l.trim()).filter(Boolean).join("\n");
-
 const DBMSPage: React.FC = () => {
   const { user, profile } = useAuth();
   const [questions, setQuestions] = useState<DbmsQuestion[]>([]);
@@ -52,9 +42,9 @@ const DBMSPage: React.FC = () => {
   const [diffFilter, setDiffFilter] = useState("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [showHints, setShowHints] = useState<Record<string, boolean>>({});
-  const [userOutput, setUserOutput] = useState<Record<string, string>>({});
-  const [results, setResults] = useState<Record<string, "correct" | "wrong" | null>>({});
+  const [userQuery, setUserQuery] = useState<Record<string, string>>({});
   const [solved, setSolved] = useState<Set<string>>(new Set());
+  const [pending, setPending] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -63,16 +53,22 @@ const DBMSPage: React.FC = () => {
       try {
         const [qSnap, subSnap] = await Promise.all([
           getDocs(query(collection(db, "dbms_questions"), orderBy("createdAt", "desc"))),
-          user ? getDocs(query(collection(db, "dbms_submissions"), orderBy("submittedAt", "desc"))) : Promise.resolve(null),
+          user
+            ? getDocs(query(collection(db, "dbms_submissions"), orderBy("submittedAt", "desc")))
+            : Promise.resolve(null),
         ]);
         setQuestions(qSnap.docs.map(d => ({ id: d.id, ...d.data() } as DbmsQuestion)));
         if (subSnap && user) {
           const solvedIds = new Set<string>();
+          const pendingIds = new Set<string>();
           subSnap.docs.forEach(d => {
             const data = d.data() as any;
-            if (data.userId === user.uid && data.status === "correct") solvedIds.add(data.questionId);
+            if (data.userId !== user.uid) return;
+            if (data.status === "pass") solvedIds.add(data.questionId);
+            else if (data.status === "pending") pendingIds.add(data.questionId);
           });
           setSolved(solvedIds);
+          setPending(pendingIds);
         }
       } catch (err) { console.error(err); }
       finally { setLoading(false); }
@@ -81,39 +77,40 @@ const DBMSPage: React.FC = () => {
 
   const handleSubmit = async (q: DbmsQuestion) => {
     if (!user || !profile) { toast.error("Please login first!"); return; }
-    const userAns = userOutput[q.id] || "";
-    if (!userAns.trim()) { toast.error("Please paste your query output first!"); return; }
+    const sql = userQuery[q.id] || "";
+    if (!sql.trim()) { toast.error("Please type your SQL query first!"); return; }
     setIsSubmitting(true);
     try {
-      const expected = q.expectedOutput || "";
-      const isCorrect = expected.trim() ? normalizeOutput(userAns) === normalizeOutput(expected) : false;
-      const status = isCorrect ? "correct" : "wrong";
-      const pts = isCorrect ? (POINTS[q.difficulty] ?? 10) : 0;
       await addDoc(collection(db, "dbms_submissions"), {
-        userId: user.uid, userName: profile.displayName, userEmail: user.email,
-        questionId: q.id, questionTitle: q.title, topic: q.topic, difficulty: q.difficulty,
-        userOutput: userAns, expectedOutput: expected, status, points: pts,
+        userId: user.uid,
+        userName: profile.displayName,
+        userEmail: user.email,
+        questionId: q.id,
+        questionTitle: q.title,
+        topic: q.topic,
+        difficulty: q.difficulty,
+        userQuery: sql,
+        status: "pending",
+        points: 0,
         submittedAt: serverTimestamp(),
       });
-      if (isCorrect && !solved.has(q.id)) {
-        await updateDoc(doc(db, "users", user.uid), {
-          score: increment(pts), problemsSolved: increment(1),
-        });
-        setSolved(prev => new Set([...prev, q.id]));
-        toast.success(`Correct! +${pts} points!`);
-      } else if (isCorrect) {
-        toast.success("Correct! (already solved, no extra points)");
-      } else {
-        if (!expected.trim()) toast.error("No expected output set by admin yet. Ask your admin to add it!");
-        else toast.error("Output does not match. Check your query and try again!");
-      }
-      setResults(p => ({ ...p, [q.id]: status }));
-    } catch (err) { toast.error("Submission failed!"); console.error(err); }
-    finally { setIsSubmitting(false); }
+      setPending(prev => new Set([...prev, q.id]));
+      toast.success("Query submitted! Admin will grade it soon.");
+    } catch (err) {
+      toast.error("Submission failed!");
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const toggle = (id: string, _state: Record<string, boolean>, setter: React.Dispatch<React.SetStateAction<Record<string, boolean>>>) => {
+  const toggle = (id: string, setter: React.Dispatch<React.SetStateAction<Record<string, boolean>>>) => {
     setter(p => ({ ...p, [id]: !p[id] }));
+  };
+
+  const blockCopyPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    toast.error("Copy/Paste is disabled for fair assessment!");
   };
 
   const filtered = questions.filter(q => {
@@ -133,8 +130,6 @@ const DBMSPage: React.FC = () => {
       <Navbar />
       <div className="page">
         <div className="page-content" style={{ maxWidth: 900 }}>
-
-          {/* Header */}
           <div style={{ marginBottom: 32 }}>
             <div className="flex items-center gap-3" style={{ marginBottom: 10 }}>
               <div style={{ width: 48, height: 48, borderRadius: 14, background: "linear-gradient(135deg,rgba(34,211,238,0.2),rgba(6,182,212,0.1))", border: "1px solid rgba(34,211,238,0.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -144,15 +139,15 @@ const DBMSPage: React.FC = () => {
                 <h1 className="font-display" style={{ fontSize: "clamp(22px,4vw,34px)", fontWeight: 800, margin: 0, lineHeight: 1.1 }}>
                   DBMS <span style={{ background: "linear-gradient(135deg,var(--cyan),#0891b2)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Lab</span>
                 </h1>
-                <p style={{ color: "var(--text-3)", fontSize: 13, margin: 0 }}>Output-based SQL grading — write your query, run it, paste the result</p>
+                <p style={{ color: "var(--text-3)", fontSize: 13, margin: 0 }}>Write your SQL query — admin reviews and grades your submission</p>
               </div>
             </div>
-
             {user && (
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 {[
-                  { label: "Solved", value: `${solvedCount}/${questions.length}`, color: "var(--cyan)" },
+                  { label: "Passed", value: `${solvedCount}/${questions.length}`, color: "var(--cyan)" },
                   { label: "Points Earned", value: `${totalPoints} pts`, color: "var(--yellow)" },
+                  { label: "Pending", value: questions.filter(q => pending.has(q.id)).length, color: "var(--yellow)" },
                   { label: "Easy", value: questions.filter(q=>q.difficulty==="easy").length, color: "var(--green)" },
                   { label: "Medium", value: questions.filter(q=>q.difficulty==="medium").length, color: "var(--yellow)" },
                   { label: "Hard", value: questions.filter(q=>q.difficulty==="hard").length, color: "var(--red)" },
@@ -166,7 +161,6 @@ const DBMSPage: React.FC = () => {
             )}
           </div>
 
-          {/* Filters */}
           <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
             <div style={{ position: "relative", flex: "1 1 220px" }}>
               <Search size={14} style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "var(--text-3)" }} />
@@ -184,13 +178,15 @@ const DBMSPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Grading info banner */}
           <div style={{ marginBottom: 20, padding: "12px 16px", background: "rgba(34,211,238,0.06)", border: "1px solid rgba(34,211,238,0.2)", borderRadius: 10, fontSize: 12, color: "var(--text-2)", lineHeight: 1.7 }}>
-            <strong style={{ color: "var(--cyan)" }}>How output-based grading works:</strong> Write your SQL query in any SQL tool (MySQL Workbench, SQLite, DBeaver, etc.), execute it, copy the result table, and paste it below. The system compares your output with the admin-defined expected output. Multiple valid SQL queries that produce the same output are all accepted!
-            <div style={{ marginTop: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <strong style={{ color: "var(--cyan)" }}>How it works:</strong> Read the question, write your SQL query below, and click <em>Submit Query</em>. Your instructor reviews and marks it <strong style={{ color: "var(--green)" }}>Pass</strong> or <strong style={{ color: "var(--red)" }}>Fail</strong>. Points are awarded on Pass only.
+            <div style={{ marginTop: 6, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ color: "var(--green)", fontSize: 11 }}>Easy = 10 pts</span>
               <span style={{ color: "var(--yellow)", fontSize: 11 }}>Medium = 25 pts</span>
               <span style={{ color: "var(--red)", fontSize: 11 }}>Hard = 50 pts</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "rgba(239,68,68,0.8)" }}>
+                <ShieldOff size={11} /> Copy/Paste disabled for fair assessment
+              </span>
             </div>
           </div>
 
@@ -206,15 +202,18 @@ const DBMSPage: React.FC = () => {
               {filtered.map(q => {
                 const isExpanded = expanded[q.id];
                 const showHint = showHints[q.id];
-                const result = results[q.id];
                 const isSolved = solved.has(q.id);
+                const isPending = pending.has(q.id);
                 const pts = POINTS[q.difficulty] || 10;
                 const dc = q.difficulty === "easy" ? "diff-easy" : q.difficulty === "medium" ? "diff-medium" : "diff-hard";
+                const cardBorder = isSolved
+                  ? "1px solid rgba(16,185,129,0.35)"
+                  : isPending ? "1px solid rgba(245,158,11,0.35)"
+                  : "1px solid var(--border)";
 
                 return (
-                  <div key={q.id} className="glass-card" style={{ padding: 0, overflow: "hidden", border: isSolved ? "1px solid rgba(16,185,129,0.3)" : "1px solid var(--border)", transition: "all 0.2s" }}>
-                    {/* Question header */}
-                    <button onClick={() => toggle(q.id, expanded, setExpanded)} style={{ width: "100%", background: "none", border: "none", padding: "16px 20px", cursor: "pointer", textAlign: "left" }}>
+                  <div key={q.id} className="glass-card" style={{ padding: 0, overflow: "hidden", border: cardBorder, transition: "all 0.2s" }}>
+                    <button onClick={() => toggle(q.id, setExpanded)} style={{ width: "100%", background: "none", border: "none", padding: "16px 20px", cursor: "pointer", textAlign: "left" }}>
                       <div className="flex items-center justify-between gap-3" style={{ flexWrap: "wrap" }}>
                         <div className="flex items-center gap-3 flex-1" style={{ minWidth: 0 }}>
                           <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(34,211,238,0.1)", border: "1px solid rgba(34,211,238,0.2)", fontWeight: 800, fontSize: 11, color: "var(--cyan)", fontFamily: "Syne,sans-serif" }}>
@@ -223,6 +222,7 @@ const DBMSPage: React.FC = () => {
                           <div style={{ minWidth: 0 }}>
                             <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 4 }}>
                               {isSolved && <CheckCircle2 size={14} color="var(--green)" />}
+                              {isPending && !isSolved && <Clock size={14} color="var(--yellow)" />}
                               <span style={{ fontWeight: 700, fontSize: 15 }}>{q.title}</span>
                             </div>
                             <div className="flex items-center gap-2 flex-wrap">
@@ -235,7 +235,9 @@ const DBMSPage: React.FC = () => {
                         </div>
                         <div className="flex items-center gap-3">
                           {isSolved ? (
-                            <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 700 }}>SOLVED</span>
+                            <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 700 }}>PASSED</span>
+                          ) : isPending ? (
+                            <span style={{ fontSize: 11, color: "var(--yellow)", fontWeight: 700 }}>PENDING</span>
                           ) : (
                             <span style={{ fontSize: 11, color: "var(--text-3)" }}>attempt</span>
                           )}
@@ -244,14 +246,11 @@ const DBMSPage: React.FC = () => {
                       </div>
                     </button>
 
-                    {/* Expanded content */}
                     {isExpanded && (
                       <div style={{ padding: "0 20px 20px", borderTop: "1px solid var(--border)" }}>
                         <div style={{ paddingTop: 16 }}>
-
                           <p style={{ fontSize: 14, color: "var(--text-2)", lineHeight: 1.75, marginBottom: 18 }}>{q.description}</p>
 
-                          {/* Sample data tables */}
                           {q.tableData && q.tableData.some(t => t.name) && (
                             <div style={{ marginBottom: 18 }}>
                               <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
@@ -296,56 +295,74 @@ const DBMSPage: React.FC = () => {
                             </div>
                           )}
 
-                          {/* Output submission area */}
                           <div style={{ marginBottom: 16 }}>
                             <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
                               <Send size={13} color="var(--yellow)" />
-                              <span style={{ fontWeight: 700, fontSize: 13, color: "var(--yellow)" }}>Submit Your Output</span>
-                              <span style={{ fontSize: 10, color: "var(--text-3)", marginLeft: "auto", display: "flex", alignItems: "center", gap: 3 }}>
-                                <Lock size={9} /> Output-based grading
+                              <span style={{ fontWeight: 700, fontSize: 13, color: "var(--yellow)" }}>Write Your SQL Query</span>
+                              <span style={{ fontSize: 10, color: "rgba(239,68,68,0.8)", marginLeft: "auto", display: "flex", alignItems: "center", gap: 3 }}>
+                                <ShieldOff size={9} /> No copy/paste
                               </span>
                             </div>
 
                             <div style={{ padding: "10px 14px", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.18)", borderRadius: 8, marginBottom: 10, fontSize: 12, color: "var(--text-2)", lineHeight: 1.7 }}>
-                              <strong>How to submit:</strong> Run your SQL query in any tool (MySQL, SQLite, DBeaver, etc.), copy the output table, paste it below. Any valid SQL that produces the correct result is accepted!
+                              <strong>Instructions:</strong> Type your SQL query directly in the box below. Copy/paste is disabled. Your instructor will review and mark it Pass or Fail.
                             </div>
 
-                            <textarea
-                              className="input" rows={5}
-                              style={{ fontFamily: "JetBrains Mono,monospace", fontSize: 12, resize: "vertical", borderColor: result === "correct" ? "rgba(16,185,129,0.4)" : result === "wrong" ? "rgba(239,68,68,0.4)" : undefined }}
-                              placeholder={"Paste your query output here...\n\nExample:\nname     | salary\n---------|--------\nAlice    | 75000\nBob      | 90000"}
-                              value={userOutput[q.id] || ""}
-                              onChange={e => { setUserOutput(p => ({ ...p, [q.id]: e.target.value })); setResults(p => ({ ...p, [q.id]: null })); }}
-                              disabled={isSolved}
-                            />
-
-                            {result === "correct" && (
-                              <div style={{ marginTop: 8, padding: "10px 14px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.35)", borderRadius: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                                <CheckCircle2 size={16} color="var(--green)" />
-                                <span style={{ color: "var(--green)", fontWeight: 700, fontSize: 13 }}>Correct! +{pts} points awarded!</span>
+                            {isSolved ? (
+                              <div style={{ padding: "14px 16px", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 8, display: "flex", alignItems: "center", gap: 10 }}>
+                                <CheckCircle2 size={18} color="var(--green)" />
+                                <div>
+                                  <div style={{ color: "var(--green)", fontWeight: 700, fontSize: 14 }}>Passed! +{pts} points awarded</div>
+                                  <div style={{ color: "var(--text-3)", fontSize: 12, marginTop: 2 }}>Admin has marked your submission as Pass.</div>
+                                </div>
                               </div>
-                            )}
-                            {result === "wrong" && (
-                              <div style={{ marginTop: 8, padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                                <XCircle size={16} color="var(--red)" />
-                                <span style={{ color: "var(--red)", fontWeight: 700, fontSize: 13 }}>Output does not match. Check your query and try again!</span>
+                            ) : isPending ? (
+                              <div style={{ padding: "14px 16px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, display: "flex", alignItems: "center", gap: 10 }}>
+                                <Clock size={18} color="var(--yellow)" />
+                                <div>
+                                  <div style={{ color: "var(--yellow)", fontWeight: 700, fontSize: 14 }}>Submission Pending Review</div>
+                                  <div style={{ color: "var(--text-3)", fontSize: 12, marginTop: 2 }}>Your query has been submitted. Waiting for admin to grade it.</div>
+                                </div>
                               </div>
-                            )}
-                            {isSolved && result !== "correct" && (
-                              <div style={{ marginTop: 8, padding: "8px 14px", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.25)", borderRadius: 8, fontSize: 12, color: "var(--green)" }}>You have already solved this question!</div>
-                            )}
-
-                            {!isSolved && (
-                              <button onClick={() => handleSubmit(q)} disabled={isSubmitting || !user}
-                                style={{ marginTop: 12, padding: "10px 22px", background: user ? "linear-gradient(135deg,var(--cyan),#0891b2)" : "rgba(0,0,0,0.3)", color: user ? "#000" : "var(--text-3)", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: user ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 8, transition: "all 0.2s", boxShadow: user ? "0 4px 16px rgba(34,211,238,0.28)" : "none" }}>
-                                {isSubmitting ? <><div style={{ width: 13, height: 13, border: "2px solid rgba(0,0,0,0.3)", borderTop: "2px solid #000", borderRadius: "50%", animation: "spin-slow 0.8s linear infinite" }} /> Checking...</> : user ? <><Send size={13} /> Submit Output (+{pts} pts)</> : <><Lock size={13} /> Login to Submit</>}
-                              </button>
+                            ) : (
+                              <>
+                                <textarea
+                                  className="input"
+                                  rows={6}
+                                  style={{ fontFamily: "JetBrains Mono,monospace", fontSize: 13, resize: "vertical" }}
+                                  placeholder={"Write your SQL query here...\n\nExample:\nSELECT name, salary\nFROM Employee\nWHERE salary > 50000\nORDER BY salary DESC;"}
+                                  value={userQuery[q.id] || ""}
+                                  onChange={e => setUserQuery(p => ({ ...p, [q.id]: e.target.value }))}
+                                  onCopy={blockCopyPaste}
+                                  onCut={blockCopyPaste}
+                                  onPaste={blockCopyPaste}
+                                  disabled={!user}
+                                  spellCheck={false}
+                                  autoCorrect="off"
+                                  autoCapitalize="off"
+                                />
+                                {!user && (
+                                  <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-3)", display: "flex", alignItems: "center", gap: 5 }}>
+                                    <Lock size={11} /> Login to submit your query
+                                  </div>
+                                )}
+                                <button
+                                  onClick={() => handleSubmit(q)}
+                                  disabled={isSubmitting || !user}
+                                  style={{ marginTop: 12, padding: "10px 22px", background: user ? "linear-gradient(135deg,var(--cyan),#0891b2)" : "rgba(0,0,0,0.3)", color: user ? "#000" : "var(--text-3)", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: user ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 8, transition: "all 0.2s", boxShadow: user ? "0 4px 16px rgba(34,211,238,0.28)" : "none" }}>
+                                  {isSubmitting
+                                    ? <><div style={{ width: 13, height: 13, border: "2px solid rgba(0,0,0,0.3)", borderTop: "2px solid #000", borderRadius: "50%", animation: "spin-slow 0.8s linear infinite" }} /> Submitting...</>
+                                    : user
+                                    ? <><Send size={13} /> Submit Query (earn {pts} pts on pass)</>
+                                    : <><Lock size={13} /> Login to Submit</>}
+                                </button>
+                              </>
                             )}
                           </div>
 
                           {q.hint && (
                             <div style={{ marginBottom: 12 }}>
-                              <button className="btn btn-ghost btn-sm" style={{ color: "var(--yellow)", borderColor: "rgba(245,158,11,0.28)" }} onClick={() => toggle(q.id, showHints, setShowHints)}>
+                              <button className="btn btn-ghost btn-sm" style={{ color: "var(--yellow)", borderColor: "rgba(245,158,11,0.28)" }} onClick={() => toggle(q.id, setShowHints)}>
                                 <Lightbulb size={11} /> {showHint ? "Hide Hint" : "Show Hint"}
                               </button>
                               {showHint && (
@@ -361,7 +378,7 @@ const DBMSPage: React.FC = () => {
                             <div style={{ marginTop: 12, padding: "11px 14px", background: "rgba(139,92,246,0.07)", border: "1px solid rgba(139,92,246,0.22)", borderRadius: "var(--radius-sm)" }}>
                               <div className="flex items-center gap-2" style={{ marginBottom: 6 }}>
                                 <BookOpen size={12} color="var(--purple-light)" />
-                                <span style={{ fontWeight: 700, fontSize: 12, color: "var(--purple-light)" }}>Explanation (unlocked after solving)</span>
+                                <span style={{ fontWeight: 700, fontSize: 12, color: "var(--purple-light)" }}>Explanation (unlocked after passing)</span>
                               </div>
                               <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.7, margin: 0 }}>{q.explanation}</p>
                             </div>

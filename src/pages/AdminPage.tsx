@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   collection, getDocs, query, orderBy, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp,
+  doc, serverTimestamp, increment,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,7 +11,7 @@ import {
   Shield, Plus, Trash2, Edit3, Users, BookOpen, BarChart2,
   Save, X, AlertTriangle, UserCheck, UserX, Loader2,
   Database, CheckCircle2, Activity, Award, Clock, Zap,
-  Eye, EyeOff, Table2,
+  Eye, EyeOff, Table2, ThumbsUp, ThumbsDown,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { Problem } from './ProblemsPage';
@@ -132,6 +132,7 @@ const AdminPage: React.FC = () => {
   const [dbmsSubmissions, setDbmsSubmissions] = useState<any[]>([]);
   const [allSubmissions, setAllSubmissions] = useState<any[]>([]);
   const [deletingSubId, setDeletingSubId] = useState<string | null>(null);
+  const [gradingId, setGradingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAdmin) { navigate('/'); return; }
@@ -174,6 +175,31 @@ const AdminPage: React.FC = () => {
       loadData();
     } catch { toast.error('Failed!'); }
     finally { setDeletingSubId(null); }
+  };
+
+  const DBMS_POINTS: Record<string, number> = { easy: 10, medium: 25, hard: 50 };
+
+  const gradeDbmsSubmission = async (sub: any, verdict: 'pass' | 'fail') => {
+    setGradingId(sub.id);
+    try {
+      const pts = verdict === 'pass' ? (DBMS_POINTS[sub.difficulty] ?? 10) : 0;
+      await updateDoc(doc(db, 'dbms_submissions', sub.id), {
+        status: verdict,
+        points: pts,
+        gradedAt: serverTimestamp(),
+      });
+      if (verdict === 'pass') {
+        await updateDoc(doc(db, 'users', sub.userId), {
+          score: increment(pts),
+          problemsSolved: increment(1),
+        });
+        toast.success(`Marked PASS — +${pts} pts awarded to ${sub.userName}`);
+      } else {
+        toast.success(`Marked FAIL for ${sub.userName}`);
+      }
+      loadData();
+    } catch (err) { toast.error('Grading failed!'); console.error(err); }
+    finally { setGradingId(null); }
   };
 
   const deleteCodeSubmission = async (id: string) => {
@@ -838,41 +864,67 @@ const AdminPage: React.FC = () => {
                 <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
                   <Database size={14} color="var(--cyan)"/>
                   <span style={{ fontWeight:700, fontSize:14 }}>DBMS Submissions</span>
+                  <span style={{ fontSize:11, color:'var(--text-3)' }}>{dbmsSubmissions.filter((s:any)=>s.status==='pending').length} pending</span>
                   <span style={{ fontSize:11, color:'var(--text-3)', marginLeft:'auto' }}>{dbmsSubmissions.length} total</span>
                 </div>
                 {dbmsSubmissions.length === 0 ? (
                   <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--text-3)' }}><p>No DBMS submissions yet.</p></div>
                 ) : (
                   <div style={{ overflowX:'auto' }}>
-                    <table style={{ width:'100%', minWidth:700 }}>
+                    <table style={{ width:'100%', minWidth:800 }}>
                       <thead><tr>
-                        <th>Student</th><th>Question</th><th>Difficulty</th><th>Status</th><th>Points</th><th>Output</th><th>Actions</th>
+                        <th>Student</th><th>Question</th><th>Difficulty</th><th>SQL Query</th><th>Status</th><th>Pts</th><th>Grade</th><th>Del</th>
                       </tr></thead>
                       <tbody>
                         {dbmsSubmissions.map((s: any) => (
-                          <tr key={s.id} style={{ borderBottom:'1px solid rgba(255,255,255,0.04)' }}>
+                          <tr key={s.id} style={{ borderBottom:'1px solid rgba(255,255,255,0.04)', background: s.status==='pending'?'rgba(245,158,11,0.03)':undefined }}>
                             <td>
                               <div style={{ fontWeight:500, fontSize:13 }}>{s.userName}</div>
                               <div style={{ fontSize:10, color:'var(--text-3)' }}>{s.userEmail}</div>
                             </td>
-                            <td style={{ fontSize:12, maxWidth:180 }}>
+                            <td style={{ fontSize:12, maxWidth:160 }}>
                               <div style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.questionTitle}</div>
                               <div style={{ fontSize:10, color:'var(--text-3)' }}>{s.topic}</div>
                             </td>
                             <td>
                               <span className={`badge ${s.difficulty==='easy'?'diff-easy':s.difficulty==='medium'?'diff-medium':'diff-hard'}`}>{s.difficulty}</span>
                             </td>
+                            <td style={{ maxWidth:220 }}>
+                              <details style={{ cursor:'pointer' }}>
+                                <summary style={{ fontSize:10, color:'var(--cyan)', cursor:'pointer' }}>View Query</summary>
+                                <pre style={{ fontSize:11, fontFamily:'JetBrains Mono,monospace', color:'var(--text-1)', background:'rgba(0,0,0,0.35)', padding:'8px 10px', borderRadius:6, marginTop:4, maxHeight:120, overflow:'auto', whiteSpace:'pre-wrap', border:'1px solid rgba(34,211,238,0.12)' }}>{s.userQuery || s.userOutput || '(no query)'}</pre>
+                              </details>
+                            </td>
                             <td>
-                              <span style={{ fontWeight:700, fontSize:12, color:s.status==='correct'?'var(--green)':'var(--red)' }}>
-                                {s.status==='correct' ? '✅ Correct' : '❌ Wrong'}
+                              <span style={{ fontWeight:700, fontSize:12,
+                                color: s.status==='pass'?'var(--green)':s.status==='fail'?'var(--red)':'var(--yellow)' }}>
+                                {s.status==='pass' ? '✅ Pass' : s.status==='fail' ? '❌ Fail' : '⏳ Pending'}
                               </span>
                             </td>
                             <td style={{ fontWeight:700, color:'var(--yellow)', fontSize:13 }}>{s.points || 0}</td>
-                            <td style={{ maxWidth:200 }}>
-                              <details style={{ cursor:'pointer' }}>
-                                <summary style={{ fontSize:10, color:'var(--cyan)', cursor:'pointer' }}>View output</summary>
-                                <pre style={{ fontSize:10, fontFamily:'JetBrains Mono,monospace', color:'var(--text-2)', background:'rgba(0,0,0,0.3)', padding:'6px 8px', borderRadius:6, marginTop:4, maxHeight:80, overflow:'auto', whiteSpace:'pre-wrap' }}>{s.userOutput}</pre>
-                              </details>
+                            <td>
+                              {s.status === 'pending' ? (
+                                <div style={{ display:'flex', gap:4 }}>
+                                  <button
+                                    className="btn btn-sm"
+                                    disabled={gradingId === s.id}
+                                    style={{ background:'rgba(16,185,129,0.15)', color:'var(--green)', border:'1px solid rgba(16,185,129,0.3)', padding:'4px 8px' }}
+                                    onClick={() => gradeDbmsSubmission(s, 'pass')}
+                                    title="Mark as Pass">
+                                    {gradingId===s.id ? <Loader2 size={10} style={{animation:'spin-slow 0.8s linear infinite'}}/> : <ThumbsUp size={11}/>} Pass
+                                  </button>
+                                  <button
+                                    className="btn btn-sm"
+                                    disabled={gradingId === s.id}
+                                    style={{ background:'rgba(239,68,68,0.12)', color:'var(--red)', border:'1px solid rgba(239,68,68,0.28)', padding:'4px 8px' }}
+                                    onClick={() => gradeDbmsSubmission(s, 'fail')}
+                                    title="Mark as Fail">
+                                    {gradingId===s.id ? <Loader2 size={10} style={{animation:'spin-slow 0.8s linear infinite'}}/> : <ThumbsDown size={11}/>} Fail
+                                  </button>
+                                </div>
+                              ) : (
+                                <span style={{ fontSize:10, color:'var(--text-3)' }}>Graded</span>
+                              )}
                             </td>
                             <td>
                               <button className="btn btn-danger btn-sm" disabled={deletingSubId === s.id} onClick={() => deleteDbmsSubmission(s.id)}>
