@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Zap, ArrowRight, Lock, Mail, User } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
@@ -17,9 +17,9 @@ const FUNNY_MESSAGES = [
   "sudo make me admin...",
 ];
 
-const FLOAT_EMOJIS = ["</>" , "{ }", "[ ]", "==>", "***", "fn()", "var", "let", "=>", "???", "!!!", "~~~"];
+const FLOAT_ITEMS = ["</>", "{ }", "[ ]", "==>", "fn()", "var", "let", "=>", "???", "!!!", "~~~", "SQL"];
 
-const AuthPage = ({ mode }) => {
+const AuthPage: React.FC<{ mode: "login" | "register" }> = ({ mode }) => {
   const { login, register } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "" });
@@ -27,7 +27,7 @@ const AuthPage = ({ mode }) => {
   const [loading, setLoading] = useState(false);
   const [funnyIdx, setFunnyIdx] = useState(0);
 
-  const floaters = FLOAT_EMOJIS.map((txt, i) => ({
+  const floaters = FLOAT_ITEMS.map((txt, i) => ({
     txt, x: (i * 8.5 + 3) % 100, y: (i * 13 + 5) % 100,
     delay: i * 0.4, dur: 3.5 + (i % 4) * 0.8, size: 14 + (i % 3) * 6,
   }));
@@ -38,7 +38,7 @@ const AuthPage = ({ mode }) => {
     return () => clearInterval(t);
   }, [loading]);
 
-  const handle = async (e) => {
+  const handle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (mode === "register" && form.password !== form.confirm) { toast.error("Passwords do not match!"); return; }
     if (form.password.length < 6) { toast.error("Password must be at least 6 characters!"); return; }
@@ -54,13 +54,14 @@ const AuthPage = ({ mode }) => {
         toast.success("Account created! Adventure unlocked!");
         navigate("/problems");
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      const e = err as { code?: string; message?: string };
       const msg =
-        err.code === "auth/user-not-found"      ? "User not found!" :
-        err.code === "auth/wrong-password"       ? "Wrong password!" :
-        err.code === "auth/email-already-in-use" ? "Email already registered!" :
-        err.code === "auth/invalid-email"        ? "Invalid email!" :
-        err.message || "Something went wrong!";
+        e.code === "auth/user-not-found"      ? "User not found!" :
+        e.code === "auth/wrong-password"       ? "Wrong password!" :
+        e.code === "auth/email-already-in-use" ? "Email already registered!" :
+        e.code === "auth/invalid-email"        ? "Invalid email!" :
+        e.message || "Something went wrong!";
       toast.error(msg);
     } finally { setLoading(false); }
   };
@@ -85,8 +86,8 @@ const AuthPage = ({ mode }) => {
       <style>{css}</style>
       <div style={{position:"fixed",inset:0,background:"radial-gradient(ellipse at 30% 50%,rgba(139,92,246,0.12) 0%,transparent 50%),radial-gradient(ellipse at 70% 50%,rgba(34,211,238,0.09) 0%,transparent 50%)",pointerEvents:"none",animation:"auth-bg 4s ease-in-out infinite"}}/>
       <div style={{position:"fixed",inset:0,backgroundImage:"linear-gradient(rgba(139,92,246,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(139,92,246,0.04) 1px,transparent 1px)",backgroundSize:"60px 60px",pointerEvents:"none",zIndex:0}}/>
-      {floaters.map((f,i)=>(
-        <div key={i} style={{position:"fixed",left:f.x+"%",top:f.y+"%",fontSize:f.size,fontFamily:"JetBrains Mono,monospace",fontWeight:800,color:"var(--purple-light)",pointerEvents:"none",animation:`float-auth ${f.dur}s ease-in-out ${f.delay}s infinite alternate`,userSelect:"none",zIndex:0}}>
+      {floaters.map((f,i) => (
+        <div key={i} style={{position:"fixed",left:f.x+"%",top:f.y+"%",fontSize:f.size,fontFamily:"JetBrains Mono,monospace",fontWeight:800,color:"var(--purple-light)",pointerEvents:"none",animation:`float-auth ${f.dur}s ease-in-out ${f.delay}s infinite alternate`,userSelect:"none",zIndex:0,opacity:0.1}}>
           {f.txt}
         </div>
       ))}
@@ -112,7 +113,7 @@ const AuthPage = ({ mode }) => {
             </Link>
           </div>
           <form onSubmit={handle} style={{display:"flex",flexDirection:"column",gap:20}}>
-            {mode==="register"&&(
+            {mode==="register" && (
               <div>
                 <label>Full Name</label>
                 <div style={{position:"relative"}}>
@@ -138,7 +139,7 @@ const AuthPage = ({ mode }) => {
                 </button>
               </div>
             </div>
-            {mode==="register"&&(
+            {mode==="register" && (
               <div>
                 <label>Confirm Password</label>
                 <div style={{position:"relative"}}>
@@ -162,8 +163,8 @@ const AuthPage = ({ mode }) => {
               )}
             </button>
           </form>
-          {mode==="login"&&<p style={{textAlign:"center",marginTop:20,color:"var(--text-3)",fontSize:13}}>New here? <Link to="/register" style={{color:"var(--purple-light)",textDecoration:"none",fontWeight:600}}>Create account</Link></p>}
-          {mode==="register"&&<p style={{textAlign:"center",marginTop:20,color:"var(--text-3)",fontSize:13}}>Already a coder? <Link to="/login" style={{color:"var(--purple-light)",textDecoration:"none",fontWeight:600}}>Login</Link></p>}
+          {mode==="login" && <p style={{textAlign:"center",marginTop:20,color:"var(--text-3)",fontSize:13}}>New here? <Link to="/register" style={{color:"var(--purple-light)",textDecoration:"none",fontWeight:600}}>Create account</Link></p>}
+          {mode==="register" && <p style={{textAlign:"center",marginTop:20,color:"var(--text-3)",fontSize:13}}>Already a coder? <Link to="/login" style={{color:"var(--purple-light)",textDecoration:"none",fontWeight:600}}>Login</Link></p>}
         </div>
         <p style={{textAlign:"center",marginTop:20,color:"var(--text-3)",fontSize:12}}>By joining, you agree to practice coding and not cheat.</p>
         <div style={{textAlign:"center",marginTop:8,fontSize:10,color:"var(--text-3)",fontFamily:"JetBrains Mono,monospace",opacity:0.5}}>

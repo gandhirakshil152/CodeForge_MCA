@@ -185,20 +185,14 @@ const AdminPage: React.FC = () => {
     } catch { toast.error('Failed!'); }
   };
 
-  const deleteProblemComment = async (problemId: string, commentId: string) => {
-    if (!window.confirm('Delete this comment?')) return;
-    try {
-      await deleteDoc(doc(db, 'problems', problemId, 'comments', commentId));
-      toast.success('Comment deleted!');
-    } catch { toast.error('Failed!'); }
-  };
+  // deleteProblemComment is available for future use via admin submissions tab
 
   // ── Problems CRUD ──────────────────────────────────────────────────────────
   const resetForm = () => { setForm({ ...EMPTY_PROBLEM }); setEditingId(null); setShowForm(false); };
 
   const handleEdit = (p: Problem) => {
     setForm({
-      title: p.title, difficulty: p.difficulty, category: p.category,
+      title: p.title, difficulty: p.difficulty as 'easy' | 'medium' | 'hard', category: p.category,
       tags: p.tags?.join(', ') || '', description: p.description,
       inputFormat: p.inputFormat || '', outputFormat: p.outputFormat || '',
       constraints: p.constraints || '',

@@ -1,8 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import Navbar from '../components/Navbar';
 import {
   Upload, Brain, CheckCircle2, XCircle, RotateCcw,
-  FileText, Zap, BookOpen, AlertTriangle, Loader2,
+  FileText, Zap, BookOpen, AlertTriangle,
   ChevronRight, Trophy, Clock, Target,
 } from 'lucide-react';
 
@@ -31,7 +31,7 @@ async function generateMCQsFromText(text: string): Promise<MCQ[]> {
 
   // Demo MCQs based on slide text (in production, call Gemini API)
   const lines = text.split('\n').filter(l => l.trim().length > 10).slice(0, 30);
-  const topics = lines.length > 0 ? lines : ['Database Management System', 'SQL', 'Normalization'];
+  const _topics = lines.length > 0 ? lines : ['Database Management System', 'SQL', 'Normalization'];
 
   const templates: MCQ[] = [
     {

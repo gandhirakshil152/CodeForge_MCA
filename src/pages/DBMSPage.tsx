@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   collection, getDocs, query, orderBy, addDoc, serverTimestamp,
   doc, updateDoc, increment,
@@ -9,8 +9,8 @@ import Navbar from "../components/Navbar";
 import {
   Database, Search, ChevronDown, ChevronUp,
   Lightbulb, Table2, Code2, BookOpen,
-  CheckCircle2, Send, XCircle, Star,
-  Lock, Trophy,
+  CheckCircle2, Send, XCircle,
+  Lock,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -112,7 +112,7 @@ const DBMSPage: React.FC = () => {
     finally { setIsSubmitting(false); }
   };
 
-  const toggle = (id: string, map: Record<string, boolean>, setter: React.Dispatch<React.SetStateAction<Record<string, boolean>>>) => {
+  const toggle = (id: string, _state: Record<string, boolean>, setter: React.Dispatch<React.SetStateAction<Record<string, boolean>>>) => {
     setter(p => ({ ...p, [id]: !p[id] }));
   };
 
