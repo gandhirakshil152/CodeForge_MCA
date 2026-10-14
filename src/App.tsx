@@ -11,6 +11,8 @@ import LeaderboardPage from './pages/LeaderboardPage';
 import DashboardPage from './pages/DashboardPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
+import DBMSPage from './pages/DBMSPage';
+import PPTQuizPage from './pages/PPTQuizPage';
 
 // Route guard for authenticated pages
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -52,7 +54,9 @@ const AppRoutes: React.FC = () => (
     <Route path="/leaderboard" element={<LeaderboardPage />} />
     <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
     <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
-    {/* Admin panel at a secret-ish path */}
+    <Route path="/dbms" element={<DBMSPage />} />
+    <Route path="/ppt-quiz" element={<PPTQuizPage />} />
+    {/* Admin panel */}
     <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
     <Route path="/admin-panel" element={<AdminRoute><AdminPage /></AdminRoute>} />
     <Route path="*" element={<Navigate to="/" replace />} />

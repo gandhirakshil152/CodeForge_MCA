@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Trophy, BookOpen, LayoutDashboard, LogOut, Shield, Zap } from 'lucide-react';
+import { Trophy, BookOpen, LayoutDashboard, LogOut, Shield, Zap, Database, FileQuestion } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 const Navbar: React.FC = () => {
@@ -39,6 +39,12 @@ const Navbar: React.FC = () => {
             <Link to="/problems" className={`nav-link ${isActive('/problems') ? 'active' : ''}`}>
               <BookOpen size={15} /> Problems
             </Link>
+            <Link to="/dbms" className={`nav-link ${isActive('/dbms') ? 'active' : ''}`}>
+              <Database size={15} /> DBMS
+            </Link>
+            <Link to="/ppt-quiz" className={`nav-link ${isActive('/ppt-quiz') ? 'active' : ''}`}>
+              <FileQuestion size={15} /> PPT Quiz
+            </Link>
             <Link to="/leaderboard" className={`nav-link ${isActive('/leaderboard') ? 'active' : ''}`}>
               <Trophy size={15} /> Leaderboard
             </Link>
@@ -54,6 +60,8 @@ const Navbar: React.FC = () => {
         ) : (
           <>
             <Link to="/problems" className="nav-link"><BookOpen size={15} /> Problems</Link>
+            <Link to="/dbms" className="nav-link"><Database size={15} /> DBMS</Link>
+            <Link to="/ppt-quiz" className="nav-link"><FileQuestion size={15} /> PPT Quiz</Link>
             <Link to="/leaderboard" className="nav-link"><Trophy size={15} /> Leaderboard</Link>
           </>
         )}

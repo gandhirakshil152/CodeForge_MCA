@@ -18,19 +18,15 @@ service cloud.firestore {
 
     // ── Users ───────────────────────────────────────────────────
     match /users/{uid} {
-      // Any signed-in user can read profiles (leaderboard / comments show names)
-      allow read:   if isSignedIn();
-      // Only the owner can create their own document (enforced by UID match)
+      // Public read for leaderboard; signed-in for write
+      allow read:   if true;
       allow create: if isSignedIn() && isOwner(uid);
-      // Owner updates their own stats; admins can change role field
       allow update: if isOwner(uid) || isAdmin();
-      // Only super-admin can hard-delete a user record
       allow delete: if isSuperAdmin();
     }
 
     // ── Problems ────────────────────────────────────────────────
     match /problems/{problemId} {
-      // Problems are publicly readable (unauthenticated users can browse)
       allow read:                   if true;
       allow create, update, delete: if isAdmin();
 
@@ -38,19 +34,30 @@ service cloud.firestore {
       match /comments/{commentId} {
         allow read:   if true;
         allow create: if isSignedIn();
-        // Owner or admin can update (likes/dislikes use arrayUnion so any
-        // signed-in user needs update access on comments they didn't write)
         allow update: if isSignedIn();
         allow delete: if isSignedIn() && (isOwner(resource.data.userId) || isAdmin());
       }
     }
 
-    // ── Submissions ─────────────────────────────────────────────
+    // ── Submissions (code judge) ─────────────────────────────────
     match /submissions/{submissionId} {
-      // Require authentication to read submissions.
-      // The leaderboard queries only run when the user is logged in anyway.
-      allow read:          if isSignedIn();
-      allow create:        if isSignedIn();
+      allow read:           if isSignedIn();
+      allow create:         if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── DBMS Questions ───────────────────────────────────────────
+    match /dbms_questions/{questionId} {
+      allow read:                   if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── DBMS Submissions ─────────────────────────────────────────
+    match /dbms_submissions/{submissionId} {
+      // Students can create their own submissions and read all
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn();
+      // Admins can delete/update
       allow update, delete: if isAdmin();
     }
   }
