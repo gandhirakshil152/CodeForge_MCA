@@ -31,7 +31,8 @@ async function generateMCQsFromText(text: string): Promise<MCQ[]> {
 
   // Demo MCQs based on slide text (in production, call Gemini API)
   const lines = text.split('\n').filter(l => l.trim().length > 10).slice(0, 30);
-  const _topics = lines.length > 0 ? lines : ['Database Management System', 'SQL', 'Normalization'];
+  // lines used for context-aware template selection (future use)
+  void lines;
 
   const templates: MCQ[] = [
     {

@@ -72,7 +72,7 @@ const readline = () => lines[idx++]?.trim() ?? '';
 };
 
 const EMPTY_PROBLEM = {
-  title: '', difficulty: 'easy' as const, category: 'Arrays',
+  title: '', difficulty: 'easy' as 'easy' | 'medium' | 'hard', category: 'Arrays',
   tags: '', description: '', inputFormat: '', outputFormat: '', constraints: '',
   examples: [{ input: '', output: '', explanation: '' }],
   testCases: [{ input: '', expectedOutput: '' }],
@@ -192,7 +192,9 @@ const AdminPage: React.FC = () => {
 
   const handleEdit = (p: Problem) => {
     setForm({
-      title: p.title, difficulty: p.difficulty as 'easy' | 'medium' | 'hard', category: p.category,
+     title: p.title,
+    difficulty: p.difficulty,
+  category: p.category,
       tags: p.tags?.join(', ') || '', description: p.description,
       inputFormat: p.inputFormat || '', outputFormat: p.outputFormat || '',
       constraints: p.constraints || '',
