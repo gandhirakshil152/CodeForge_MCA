@@ -41,7 +41,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return null;
-  return user ? <Navigate to="/problems" replace /> : <>{children}</>;
+  return user ? <Navigate to="/dashboard" replace /> : <>{children}</>;
 };
 
 const AppRoutes: React.FC = () => (

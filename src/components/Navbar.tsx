@@ -1,13 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Trophy, BookOpen, LayoutDashboard, LogOut, Shield, Zap, Database, FileQuestion } from 'lucide-react';
+import {
+  Trophy, BookOpen, LayoutDashboard, LogOut, Shield, Zap,
+  Database, FileQuestion, Bell, X, CheckCheck,
+} from 'lucide-react';
+import {
+  collection, query, where, onSnapshot, orderBy, limit,
+  updateDoc, doc, writeBatch,
+} from 'firebase/firestore';
+import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+
+interface Notif {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: any;
+}
 
 const Navbar: React.FC = () => {
   const { user, profile, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
+  const [notifs, setNotifs] = useState<Notif[]>([]);
+  const [showNotifs, setShowNotifs] = useState(false);
+  const bellRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 10);
@@ -15,12 +35,73 @@ const Navbar: React.FC = () => {
     return () => window.removeEventListener('scroll', handler);
   }, []);
 
+  // Real-time notifications listener
+  useEffect(() => {
+    if (!user) { setNotifs([]); return; }
+    const q = query(
+      collection(db, 'notifications'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc'),
+      limit(20),
+    );
+    const unsub = onSnapshot(q, snap => {
+      setNotifs(snap.docs.map(d => ({ id: d.id, ...d.data() } as Notif)));
+    });
+    return unsub;
+  }, [user]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+        setShowNotifs(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const unreadCount = notifs.filter(n => !n.read).length;
+
+  const markAllRead = async () => {
+    if (!user) return;
+    const unread = notifs.filter(n => !n.read);
+    if (!unread.length) return;
+    const batch = writeBatch(db);
+    unread.forEach(n => batch.update(doc(db, 'notifications', n.id), { read: true }));
+    await batch.commit();
+  };
+
+  const markOneRead = async (n: Notif) => {
+    if (n.read) return;
+    await updateDoc(doc(db, 'notifications', n.id), { read: true });
+  };
+
   const handleLogout = async () => {
     await logout();
     navigate('/');
   };
 
   const isActive = (path: string) => location.pathname === path || location.pathname.startsWith(path + '/');
+
+  const notifTypeColor = (type: string) => {
+    switch (type) {
+      case 'solve':       return 'var(--green)';
+      case 'new_problem': return 'var(--purple-light)';
+      case 'daily_task':  return 'var(--cyan)';
+      case 'streak':      return 'var(--yellow)';
+      default:            return 'var(--text-2)';
+    }
+  };
+
+  const timeAgo = (ts: any) => {
+    if (!ts?.toDate) return '';
+    const diff = Date.now() - ts.toDate().getTime();
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return `${Math.floor(diff / 86400000)}d ago`;
+  };
 
   return (
     <nav className="navbar" style={{ boxShadow: scrolled ? '0 4px 30px rgba(0,0,0,0.5)' : 'none' }}>
@@ -36,6 +117,9 @@ const Navbar: React.FC = () => {
       <div className="navbar-links" style={{ display: 'flex' }}>
         {user ? (
           <>
+            <Link to="/dashboard" className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}>
+              <LayoutDashboard size={15} /> Dashboard
+            </Link>
             <Link to="/problems" className={`nav-link ${isActive('/problems') ? 'active' : ''}`}>
               <BookOpen size={15} /> Problems
             </Link>
@@ -47,9 +131,6 @@ const Navbar: React.FC = () => {
             </Link>
             <Link to="/leaderboard" className={`nav-link ${isActive('/leaderboard') ? 'active' : ''}`}>
               <Trophy size={15} /> Leaderboard
-            </Link>
-            <Link to="/dashboard" className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}>
-              <LayoutDashboard size={15} /> Dashboard
             </Link>
             {isAdmin && (
               <Link to="/admin" className={`nav-link ${isActive('/admin') ? 'active' : ''}`} style={{ color: 'var(--yellow)' }}>
@@ -67,10 +148,102 @@ const Navbar: React.FC = () => {
         )}
       </div>
 
-      {/* Auth Buttons */}
+      {/* Auth Buttons + Notifications */}
       <div className="flex items-center gap-3">
         {user ? (
           <>
+            {/* Notification Bell */}
+            <div ref={bellRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => { setShowNotifs(v => !v); if (!showNotifs) markAllRead(); }}
+                style={{
+                  position: 'relative', background: 'var(--bg-glass)',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+                  padding: '7px 10px', cursor: 'pointer', color: 'var(--text-2)',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  transition: 'border-color 0.2s',
+                }}
+              >
+                <Bell size={16} style={{ color: unreadCount > 0 ? 'var(--yellow)' : undefined }} />
+                {unreadCount > 0 && (
+                  <span style={{
+                    position: 'absolute', top: -5, right: -5,
+                    background: 'var(--red, #ef4444)', color: '#fff',
+                    borderRadius: '50%', width: 18, height: 18,
+                    fontSize: 10, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: '2px solid var(--bg-deep)',
+                  }}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {showNotifs && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 10px)', right: 0,
+                  width: 340, maxHeight: 440,
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-lg)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+                  overflow: 'hidden', zIndex: 9999,
+                }}>
+                  {/* Header */}
+                  <div style={{
+                    padding: '14px 16px', borderBottom: '1px solid var(--border)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>🔔 Notifications</span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {unreadCount > 0 && (
+                        <button onClick={markAllRead} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--purple-light)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <CheckCheck size={13} /> Mark all read
+                        </button>
+                      )}
+                      <button onClick={() => setShowNotifs(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', display: 'flex' }}>
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* List */}
+                  <div style={{ overflowY: 'auto', maxHeight: 380 }}>
+                    {notifs.length === 0 ? (
+                      <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+                        <Bell size={28} style={{ marginBottom: 8, opacity: 0.3 }} />
+                        <p>No notifications yet</p>
+                      </div>
+                    ) : notifs.map(n => (
+                      <div
+                        key={n.id}
+                        onClick={() => markOneRead(n)}
+                        style={{
+                          padding: '12px 16px',
+                          borderBottom: '1px solid var(--border)',
+                          background: n.read ? 'transparent' : 'rgba(139,92,246,0.06)',
+                          cursor: 'default',
+                          transition: 'background 0.2s',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          <div style={{
+                            width: 8, height: 8, borderRadius: '50%',
+                            background: notifTypeColor(n.type),
+                            flexShrink: 0, marginTop: 5,
+                            opacity: n.read ? 0.3 : 1,
+                          }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)' }}>{n.title}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.5 }}>{n.message}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>{timeAgo(n.createdAt)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <Link to="/profile" style={{ textDecoration: 'none' }}>
               <div className="flex items-center gap-2" style={{ cursor: 'pointer', padding: '6px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-glass)', border: '1px solid var(--border)' }}>
                 <div className="avatar" style={{ width: 28, height: 28, fontSize: 12 }}>

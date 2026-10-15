@@ -373,6 +373,15 @@ const ProblemPage: React.FC = () => {
       setRunResult(result);
       toast.dismiss(toastId);
 
+      // ── Runtime-efficiency tiered scoring ─────────────────────
+      const baseScore = result.status === 'accepted'
+        ? result.runtime < 100  ? 150   // blazing fast
+        : result.runtime < 300  ? 125   // fast
+        : result.runtime < 500  ? 100   // decent
+        : result.runtime < 1000 ? 75    // slow
+        :                         50    // very slow
+        : 0;
+
       await addDoc(collection(db, 'submissions'), {
         userId: user.uid,
         userName: profile.displayName,
@@ -382,31 +391,82 @@ const ProblemPage: React.FC = () => {
         code,
         status: result.status,
         runtime: result.runtime,
-        score: result.status === 'accepted' ? Math.max(100 - result.runtime / 10, 10) : 0,
+        score: baseScore,
         createdAt: serverTimestamp(),
       });
 
       if (result.status === 'accepted') {
-        // Check if this user has already solved this problem before
+        // Check if already solved
         const prevAccepted = await getDocs(query(
           collection(db, 'submissions'),
           where('userId', '==', user.uid),
           where('problemId', '==', id),
           where('status', '==', 'accepted'),
         ));
-        // Only count as first solve if no prior accepted submission exists
-        // (the current submission was just added above, so size > 1 means not first)
         const isFirstSolve = prevAccepted.size <= 1;
 
-        await updateDoc(doc(db, 'problems', id!), { solvedCount: increment(isFirstSolve ? 1 : 0) });
-        await updateDoc(doc(db, 'users', user.uid), {
-          ...(isFirstSolve && {
+        // ── Streak calculation ─────────────────────────────────
+        let streakBonus = 0;
+        let newStreak = 1;
+        if (isFirstSolve) {
+          const userSnap = await getDocs(query(collection(db, 'users'), where('__name__', '==', user.uid)));
+          const userData = userSnap.docs[0]?.data() as any;
+          const lastDate: string | undefined = userData?.lastSolveDate;
+          const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+          const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+          const prevStreak = userData?.currentStreak ?? 0;
+
+          if (lastDate === today) {
+            // already solved today — keep streak
+            newStreak = prevStreak;
+          } else if (lastDate === yesterday) {
+            // consecutive day — extend streak
+            newStreak = prevStreak + 1;
+          } else {
+            // streak broken
+            newStreak = 1;
+          }
+          streakBonus = Math.min(newStreak * 5, 100); // 5 pts/day streak, cap 100
+        }
+
+        const totalScore = baseScore + streakBonus;
+
+        if (isFirstSolve) {
+          await updateDoc(doc(db, 'problems', id!), { solvedCount: increment(1) });
+          await updateDoc(doc(db, 'users', user.uid), {
             problemsSolved: increment(1),
-            score: increment(Math.max(100 - result.runtime / 10, 10)),
-          }),
-          totalSubmissions: increment(1),
-        });
-        toast.success(isFirstSolve ? '🎉 Accepted! You crushed it!' : '✅ Accepted again! (score already counted)');
+            score: increment(totalScore),
+            totalSubmissions: increment(1),
+            currentStreak: newStreak,
+            longestStreak: increment(0), // will update below
+            lastSolveDate: new Date().toISOString().slice(0, 10),
+          });
+          // Update longestStreak separately
+          const uSnap = await getDocs(query(collection(db, 'users'), where('__name__', '==', user.uid)));
+          const longest = uSnap.docs[0]?.data()?.longestStreak ?? 0;
+          if (newStreak > longest) {
+            await updateDoc(doc(db, 'users', user.uid), { longestStreak: newStreak });
+          }
+
+          // ── Notification: problem solved ───────────────────────
+          await addDoc(collection(db, 'notifications'), {
+            userId: user.uid,
+            type: 'solve',
+            title: '✅ Problem Solved!',
+            message: `You solved "${problem.title}" (+${totalScore} pts${streakBonus > 0 ? `, 🔥 ${newStreak}-day streak bonus +${streakBonus}` : ''})`,
+            read: false,
+            createdAt: serverTimestamp(),
+          });
+
+          if (streakBonus > 0) {
+            toast.success(`🎉 Accepted! +${totalScore} pts (🔥 ${newStreak}-day streak +${streakBonus} bonus!)`);
+          } else {
+            toast.success(`🎉 Accepted! +${baseScore} pts (${result.runtime < 100 ? '⚡ Blazing Fast!' : result.runtime < 500 ? '🚀 Fast!' : '✅ Solved!'})`);
+          }
+        } else {
+          await updateDoc(doc(db, 'users', user.uid), { totalSubmissions: increment(1) });
+          toast.success('✅ Accepted again! (already counted for score)');
+        }
       } else if (result.status === 'wrong_answer') {
         await updateDoc(doc(db, 'users', user.uid), { totalSubmissions: increment(1) });
         toast.error('Wrong Answer. Keep grinding! 💪');
@@ -422,6 +482,7 @@ const ProblemPage: React.FC = () => {
       setSubmitting(false);
     }
   };
+
 
   const postComment = async () => {
     if (!user || !profile) { toast.error('Login to comment!'); return; }

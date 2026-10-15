@@ -46,13 +46,13 @@ const AuthPage: React.FC<{ mode: "login" | "register" }> = ({ mode }) => {
     try {
       if (mode === "login") {
         await login(form.email, form.password);
-        toast.success("Welcome back! Lets code!");
-        navigate("/problems");
+        toast.success("Welcome back! Let's code!");
+        navigate("/dashboard");
       } else {
         if (!form.name.trim()) { toast.error("Enter your name!"); setLoading(false); return; }
         await register(form.email, form.password, form.name.trim());
-        toast.success("Account created! Adventure unlocked!");
-        navigate("/problems");
+        toast.success("Account created! Adventure unlocked! 🚀");
+        navigate("/dashboard");
       }
     } catch (err: unknown) {
       const e = err as { code?: string; message?: string };

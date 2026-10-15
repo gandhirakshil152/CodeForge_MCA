@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   collection, getDocs, query, orderBy, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, increment,
+  doc, serverTimestamp, increment, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,13 +11,24 @@ import {
   Shield, Plus, Trash2, Edit3, Users, BookOpen, BarChart2,
   Save, X, AlertTriangle, UserCheck, UserX, Loader2,
   Database, CheckCircle2, Activity, Award, Clock, Zap,
-  Eye, EyeOff, Table2, ThumbsUp, ThumbsDown,
+  Eye, EyeOff, Table2, ThumbsUp, ThumbsDown, Calendar, ListChecks,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { Problem } from './ProblemsPage';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type AdminTab = 'problems' | 'dbms' | 'users' | 'stats' | 'submissions';
+type AdminTab = 'problems' | 'dbms' | 'users' | 'stats' | 'submissions' | 'daily_tasks';
+
+interface DailyTask {
+  id: string;
+  title: string;
+  description: string;
+  type: 'code' | 'dbms' | 'any';
+  targetCount: number;
+  date: string; // YYYY-MM-DD
+  points: number;
+  createdBy?: string;
+}
 
 interface TableDef {
   name: string;
@@ -134,6 +145,13 @@ const AdminPage: React.FC = () => {
   const [deletingSubId, setDeletingSubId] = useState<string | null>(null);
   const [gradingId, setGradingId] = useState<string | null>(null);
 
+  // Daily Tasks state
+  const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
+  const [taskForm, setTaskForm] = useState({ title: '', description: '', type: 'code' as 'code'|'dbms'|'any', targetCount: 1, date: new Date().toISOString().slice(0,10), points: 50 });
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [savingTask, setSavingTask] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string|null>(null);
+
   useEffect(() => {
     if (!isAdmin) { navigate('/'); return; }
     loadData();
@@ -142,12 +160,13 @@ const AdminPage: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [pSnap, uSnap, dbmsSnap, subSnap, dbmsSubSnap] = await Promise.all([
+      const [pSnap, uSnap, dbmsSnap, subSnap, dbmsSubSnap, taskSnap] = await Promise.all([
         getDocs(query(collection(db, 'problems'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'users')),
         getDocs(query(collection(db, 'dbms_questions'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'submissions')),
         getDocs(query(collection(db, 'dbms_submissions'), orderBy('submittedAt', 'desc'))),
+        getDocs(query(collection(db, 'daily_tasks'), orderBy('date', 'desc'))),
       ]);
       setProblems(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as Problem)));
       setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -156,6 +175,7 @@ const AdminPage: React.FC = () => {
       const dbmsSubs = dbmsSubSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setAllSubmissions(subSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setDbmsSubmissions(dbmsSubs);
+      setDailyTasks(taskSnap.docs.map(d => ({ id: d.id, ...d.data() } as DailyTask)));
       setStats({
         totalUsers: uSnap.size, totalProblems: pSnap.size,
         totalDbms: dbmsSnap.size, totalSubmissions: subSnap.size,
@@ -252,8 +272,30 @@ const AdminPage: React.FC = () => {
         addedBy: profile?.displayName || 'Admin',
         ...(editingId ? { updatedAt: serverTimestamp() } : { createdAt: serverTimestamp() }),
       };
-      if (editingId) { await updateDoc(doc(db, 'problems', editingId), data); toast.success('Updated! ✅'); }
-      else           { await addDoc(collection(db, 'problems'), data);        toast.success('Published! 🎉'); }
+      if (editingId) {
+        await updateDoc(doc(db, 'problems', editingId), data);
+        toast.success('Updated! ✅');
+      } else {
+        await addDoc(collection(db, 'problems'), data);
+        toast.success('Published! 🎉');
+        // Broadcast notification to all users about new problem
+        try {
+          const uSnap = await getDocs(collection(db, 'users'));
+          const batch = writeBatch(db);
+          uSnap.docs.forEach(u => {
+            const nRef = doc(collection(db, 'notifications'));
+            batch.set(nRef, {
+              userId: u.id,
+              type: 'new_problem',
+              title: '🆕 New Problem Added!',
+              message: `"${form.title.trim()}" (${form.difficulty}) was just added. Go solve it!`,
+              read: false,
+              createdAt: serverTimestamp(),
+            });
+          });
+          await batch.commit();
+        } catch (ne) { console.warn('Notification batch failed', ne); }
+      }
       resetForm(); loadData();
     } catch (err) { toast.error('Failed!'); console.error(err); }
     finally { setSaving(false); }
@@ -322,18 +364,65 @@ const AdminPage: React.FC = () => {
     catch { toast.error('Failed!'); }
   };
 
+  // ── Daily Tasks CRUD ──────────────────────────────────────────────────────
+  const resetTaskForm = () => { setTaskForm({ title: '', description: '', type: 'code', targetCount: 1, date: new Date().toISOString().slice(0,10), points: 50 }); setEditingTaskId(null); setShowTaskForm(false); };
+
+  const handleTaskSave = async () => {
+    if (!taskForm.title.trim()) { toast.error('Title required!'); return; }
+    setSavingTask(true);
+    try {
+      if (editingTaskId) {
+        await updateDoc(doc(db, 'daily_tasks', editingTaskId), { ...taskForm, updatedAt: serverTimestamp() });
+        toast.success('Task updated! ✅');
+      } else {
+        await addDoc(collection(db, 'daily_tasks'), {
+          ...taskForm,
+          createdBy: profile?.displayName || 'Admin',
+          createdAt: serverTimestamp(),
+        });
+        toast.success('Daily task created! 🎉');
+        // Notify all users about the new daily task
+        try {
+          const uSnap = await getDocs(collection(db, 'users'));
+          const batch = writeBatch(db);
+          uSnap.docs.forEach(u => {
+            const nRef = doc(collection(db, 'notifications'));
+            batch.set(nRef, {
+              userId: u.id,
+              type: 'daily_task',
+              title: '📅 New Daily Task!',
+              message: `"${taskForm.title}" — ${taskForm.description || 'Complete today\'s challenge!'} (+${taskForm.points} pts)`,
+              read: false,
+              createdAt: serverTimestamp(),
+            });
+          });
+          await batch.commit();
+        } catch (ne) { console.warn('Notification failed', ne); }
+      }
+      resetTaskForm(); loadData();
+    } catch (err) { toast.error('Failed!'); console.error(err); }
+    finally { setSavingTask(false); }
+  };
+
+  const handleTaskDelete = async (id: string) => {
+    if (!window.confirm('Delete this daily task?')) return;
+    try { await deleteDoc(doc(db, 'daily_tasks', id)); toast.success('Deleted!'); loadData(); }
+    catch { toast.error('Failed!'); }
+  };
+
   if (!isAdmin) return null;
 
   const TABS = [
-    { id: 'problems'    as AdminTab, label: 'Problems',    icon: <BookOpen size={14} />,  count: stats.totalProblems },
-    { id: 'dbms'        as AdminTab, label: 'DBMS',        icon: <Database size={14} />,  count: stats.totalDbms },
-    { id: 'submissions' as AdminTab, label: 'Submissions', icon: <Eye size={14} />,       count: stats.totalSubmissions + stats.totalDbmsSubmissions },
-    { id: 'users'       as AdminTab, label: 'Users',       icon: <Users size={14} />,     count: stats.totalUsers },
+    { id: 'problems'    as AdminTab, label: 'Problems',    icon: <BookOpen size={14} />,   count: stats.totalProblems },
+    { id: 'dbms'        as AdminTab, label: 'DBMS',        icon: <Database size={14} />,   count: stats.totalDbms },
+    { id: 'submissions' as AdminTab, label: 'Submissions', icon: <Eye size={14} />,        count: stats.totalSubmissions + stats.totalDbmsSubmissions },
+    { id: 'users'       as AdminTab, label: 'Users',       icon: <Users size={14} />,      count: stats.totalUsers },
+    { id: 'daily_tasks' as AdminTab, label: 'Daily Tasks', icon: <Calendar size={14} />,  count: dailyTasks.length },
     { id: 'stats'       as AdminTab, label: 'Analytics',   icon: <BarChart2 size={14} /> },
   ];
 
   const tabAccent = (id: AdminTab) =>
-    id === 'dbms' ? 'var(--cyan)' : id === 'stats' ? 'var(--yellow)' : id === 'users' ? 'var(--pink)' : id === 'submissions' ? 'var(--green)' : 'var(--purple-light)';
+    id === 'dbms' ? 'var(--cyan)' : id === 'stats' ? 'var(--yellow)' : id === 'users' ? 'var(--pink)' : id === 'submissions' ? 'var(--green)' : id === 'daily_tasks' ? 'var(--cyan)' : 'var(--purple-light)';
 
   return (
     <>
@@ -1156,6 +1245,109 @@ const AdminPage: React.FC = () => {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* ══════════════ DAILY TASKS TAB ══════════════ */}
+          {tab === 'daily_tasks' && (
+            <>
+              {/* Form */}
+              {showTaskForm && (
+                <div className="glass-card" style={{ padding: 24, marginBottom: 24, border: '1px solid rgba(34,211,238,0.3)' }}>
+                  <div className="flex items-center justify-between" style={{ marginBottom: 18 }}>
+                    <h2 style={{ fontWeight: 700, fontSize: 17, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <ListChecks size={16} color="var(--cyan)" />
+                      {editingTaskId ? 'Edit Daily Task' : 'Create Daily Task'}
+                    </h2>
+                    <button className="btn btn-ghost btn-sm" onClick={resetTaskForm}><X size={13} /> Cancel</button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div style={{ gridColumn: '1/-1' }}>
+                      <label>Task Title *</label>
+                      <input className="input" placeholder="e.g. Solve 2 problems today" value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} />
+                    </div>
+                    <div style={{ gridColumn: '1/-1' }}>
+                      <label>Description</label>
+                      <input className="input" placeholder="Brief description..." value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label>Type</label>
+                      <select className="input" value={taskForm.type} onChange={e => setTaskForm(p => ({ ...p, type: e.target.value as any }))}>
+                        <option value="code">Code Problems</option>
+                        <option value="dbms">DBMS Problems</option>
+                        <option value="any">Any (Code + DBMS)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>Date</label>
+                      <input className="input" type="date" value={taskForm.date} onChange={e => setTaskForm(p => ({ ...p, date: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label>Target Count (# to solve)</label>
+                      <input className="input" type="number" min={1} max={20} value={taskForm.targetCount} onChange={e => setTaskForm(p => ({ ...p, targetCount: Number(e.target.value) }))} />
+                    </div>
+                    <div>
+                      <label>Bonus Points</label>
+                      <input className="input" type="number" min={0} max={500} step={5} value={taskForm.points} onChange={e => setTaskForm(p => ({ ...p, points: Number(e.target.value) }))} />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 18, display: 'flex', gap: 10 }}>
+                    <button className="btn btn-primary" onClick={handleTaskSave} disabled={savingTask}>
+                      {savingTask ? <Loader2 size={14} style={{ animation: 'spin-slow 0.8s linear infinite' }} /> : <Save size={14} />}
+                      {editingTaskId ? 'Update Task' : 'Create Task'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={resetTaskForm}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Add button */}
+              {!showTaskForm && (
+                <div style={{ marginBottom: 18 }}>
+                  <button className="btn" style={{ background: 'linear-gradient(135deg,var(--cyan),#0891b2)', color: '#000', fontWeight: 700 }}
+                    onClick={() => { resetTaskForm(); setShowTaskForm(true); }}>
+                    <Plus size={14} /> Add Daily Task
+                  </button>
+                </div>
+              )}
+
+              {/* Task list */}
+              {dailyTasks.length === 0 ? (
+                <div className="glass-card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
+                  <Calendar size={36} style={{ marginBottom: 12, opacity: 0.3 }} />
+                  <p>No daily tasks yet. Create one!</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {dailyTasks.map(t => (
+                    <div key={t.id} className="glass-card" style={{ padding: '16px 20px' }}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+                          <ListChecks size={18} style={{ color: 'var(--cyan)', flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 14 }}>{t.title}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{t.description}</div>
+                            <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11, background: 'rgba(34,211,238,0.15)', color: 'var(--cyan)', padding: '2px 8px', borderRadius: 20, fontWeight: 600 }}>{t.type.toUpperCase()}</span>
+                              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>📅 {t.date}</span>
+                              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>🎯 Solve {t.targetCount}</span>
+                              <span style={{ fontSize: 11, color: 'var(--yellow)', fontWeight: 600 }}>+{t.points} pts</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => { setTaskForm({ title: t.title, description: t.description, type: t.type, targetCount: t.targetCount, date: t.date, points: t.points }); setEditingTaskId(t.id); setShowTaskForm(true); }}>
+                            <Edit3 size={12} /> Edit
+                          </button>
+                          <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red, #ef4444)' }} onClick={() => handleTaskDelete(t.id)}>
+                            <Trash2 size={12} /> Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
 
           {/* ── Footer Watermark ───────────────────────────────── */}
