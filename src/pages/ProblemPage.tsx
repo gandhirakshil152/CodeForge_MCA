@@ -387,13 +387,26 @@ const ProblemPage: React.FC = () => {
       });
 
       if (result.status === 'accepted') {
-        await updateDoc(doc(db, 'problems', id!), { solvedCount: increment(1) });
+        // Check if this user has already solved this problem before
+        const prevAccepted = await getDocs(query(
+          collection(db, 'submissions'),
+          where('userId', '==', user.uid),
+          where('problemId', '==', id),
+          where('status', '==', 'accepted'),
+        ));
+        // Only count as first solve if no prior accepted submission exists
+        // (the current submission was just added above, so size > 1 means not first)
+        const isFirstSolve = prevAccepted.size <= 1;
+
+        await updateDoc(doc(db, 'problems', id!), { solvedCount: increment(isFirstSolve ? 1 : 0) });
         await updateDoc(doc(db, 'users', user.uid), {
-          problemsSolved: increment(1),
-          score: increment(Math.max(100 - result.runtime / 10, 10)),
+          ...(isFirstSolve && {
+            problemsSolved: increment(1),
+            score: increment(Math.max(100 - result.runtime / 10, 10)),
+          }),
           totalSubmissions: increment(1),
         });
-        toast.success('🎉 Accepted! You crushed it!');
+        toast.success(isFirstSolve ? '🎉 Accepted! You crushed it!' : '✅ Accepted again! (score already counted)');
       } else if (result.status === 'wrong_answer') {
         await updateDoc(doc(db, 'users', user.uid), { totalSubmissions: increment(1) });
         toast.error('Wrong Answer. Keep grinding! 💪');

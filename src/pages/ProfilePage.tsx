@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import Navbar from '../components/Navbar';
@@ -9,6 +9,7 @@ const LANG_COLORS: Record<string, string> = { java: 'lang-java', c: 'lang-c', py
 
 const ProfilePage: React.FC = () => {
   const { user, profile } = useAuth();
+  const [freshProfile, setFreshProfile] = useState<any>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [rank, setRank] = useState<number>(0);
@@ -17,10 +18,12 @@ const ProfilePage: React.FC = () => {
     if (!user) return;
     const load = async () => {
       try {
-        const [subSnap, usersSnap] = await Promise.all([
+        const [profileSnap, subSnap, usersSnap] = await Promise.all([
+          getDoc(doc(db, 'users', user.uid)),
           getDocs(query(collection(db, 'submissions'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'))),
           getDocs(query(collection(db, 'users'), orderBy('score', 'desc'))),
         ]);
+        if (profileSnap.exists()) setFreshProfile(profileSnap.data());
         setSubmissions(subSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         const idx = usersSnap.docs.findIndex(d => d.id === user.uid);
         setRank(idx >= 0 ? idx + 1 : 0);
@@ -28,6 +31,9 @@ const ProfilePage: React.FC = () => {
     };
     load();
   }, [user]);
+
+  // Use freshProfile when available, fall back to AuthContext profile
+  const p = freshProfile || profile;
 
   const accepted = submissions.filter(s => s.status === 'accepted');
   const accuracy = submissions.length > 0 ? Math.round((accepted.length / submissions.length) * 100) : 0;
@@ -45,23 +51,23 @@ const ProfilePage: React.FC = () => {
             <div style={{ position: 'absolute', top: -80, right: -80, width: 300, height: 300, borderRadius: '50%', background: 'radial-gradient(circle, rgba(139,92,246,0.15), transparent)', pointerEvents: 'none' }} />
             <div className="flex items-center gap-6 flex-wrap">
               <div className="avatar" style={{ width: 88, height: 88, fontSize: 36, boxShadow: '0 0 30px rgba(139,92,246,0.4)', border: '3px solid var(--purple)' }}>
-                {profile?.displayName?.[0]?.toUpperCase() || 'U'}
+                {p?.displayName?.[0]?.toUpperCase() || 'U'}
               </div>
               <div style={{ flex: 1 }}>
                 <h1 className="font-display" style={{ fontSize: 32, fontWeight: 800, marginBottom: 4 }}>
-                  {profile?.displayName}
+                  {p?.displayName}
                 </h1>
-                <p style={{ color: 'var(--text-2)', marginBottom: 8 }}>{profile?.email}</p>
+                <p style={{ color: 'var(--text-2)', marginBottom: 8 }}>{p?.email}</p>
                 <div className="flex gap-2 flex-wrap">
-                  <span className={`badge ${profile?.role === 'superadmin' ? 'badge-yellow' : profile?.role === 'admin' ? 'badge-purple' : 'badge-cyan'}`}>
-                    {profile?.role === 'superadmin' ? '👑 Super Admin' : profile?.role === 'admin' ? '🛡️ Admin' : '🎓 MCA Student'}
+                  <span className={`badge ${p?.role === 'superadmin' ? 'badge-yellow' : p?.role === 'admin' ? 'badge-purple' : 'badge-cyan'}`}>
+                    {p?.role === 'superadmin' ? '👑 Super Admin' : p?.role === 'admin' ? '🛡️ Admin' : '🎓 MCA Student'}
                   </span>
-                  <span className="badge badge-purple">{profile?.university || 'MCA University'}</span>
+                  <span className="badge badge-purple">{p?.university || 'MCA University'}</span>
                   {rank > 0 && <span className="badge badge-yellow">🏆 Rank #{rank}</span>}
                 </div>
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div className="font-display gradient-text" style={{ fontSize: 56, fontWeight: 800, lineHeight: 1 }}>{profile?.score || 0}</div>
+                <div className="font-display gradient-text" style={{ fontSize: 56, fontWeight: 800, lineHeight: 1 }}>{p?.score || 0}</div>
                 <div style={{ color: 'var(--text-3)', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 }}>Total Score</div>
               </div>
             </div>
@@ -70,8 +76,8 @@ const ProfilePage: React.FC = () => {
           {/* Stats Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14, marginBottom: 28 }}>
             {[
-              { icon: <CheckCircle2 size={20} />, value: profile?.problemsSolved || 0, label: 'Solved', color: 'var(--green)' },
-              { icon: <Code2 size={20} />, value: profile?.totalSubmissions || 0, label: 'Submissions', color: 'var(--purple-light)' },
+              { icon: <CheckCircle2 size={20} />, value: p?.problemsSolved || 0, label: 'Solved', color: 'var(--green)' },
+              { icon: <Code2 size={20} />, value: p?.totalSubmissions || submissions.length, label: 'Submissions', color: 'var(--purple-light)' },
               { icon: <Target size={20} />, value: `${accuracy}%`, label: 'Accuracy', color: 'var(--cyan)' },
               { icon: <Clock size={20} />, value: `${avgRuntime}ms`, label: 'Avg Runtime', color: 'var(--pink)' },
               { icon: <Trophy size={20} />, value: rank ? `#${rank}` : 'N/A', label: 'Rank', color: 'var(--yellow)' },
@@ -89,12 +95,12 @@ const ProfilePage: React.FC = () => {
           <div className="section-heading"><h2 style={{ fontSize: 20, fontWeight: 700 }}>Achievements 🏅</h2></div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 32 }}>
             {[
-              { emoji: '🚀', label: 'First Solve', unlocked: (profile?.problemsSolved || 0) >= 1 },
-              { emoji: '🔥', label: '10 Solved', unlocked: (profile?.problemsSolved || 0) >= 10 },
+              { emoji: '🚀', label: 'First Solve', unlocked: (p?.problemsSolved || 0) >= 1 },
+              { emoji: '🔥', label: '10 Solved', unlocked: (p?.problemsSolved || 0) >= 10 },
               { emoji: '💯', label: '100% Accuracy', unlocked: accuracy === 100 && submissions.length > 0 },
               { emoji: '⚡', label: 'Speed Coder', unlocked: avgRuntime < 100 && accepted.length > 0 },
               { emoji: '🏆', label: 'Top 10', unlocked: rank > 0 && rank <= 10 },
-              { emoji: '👑', label: 'Problem Master', unlocked: (profile?.problemsSolved || 0) >= 50 },
+              { emoji: '👑', label: 'Problem Master', unlocked: (p?.problemsSolved || 0) >= 50 },
             ].map((a, i) => (
               <div key={i} className="glass-card" style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 10, opacity: a.unlocked ? 1 : 0.3, border: a.unlocked ? '1px solid var(--purple)' : undefined, filter: a.unlocked ? undefined : 'grayscale(1)' }}>
                 <span style={{ fontSize: 24 }}>{a.emoji}</span>
