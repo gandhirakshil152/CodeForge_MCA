@@ -60,5 +60,38 @@ service cloud.firestore {
       // Admins can delete/update
       allow update, delete: if isAdmin();
     }
+
+    // ── Tests (MCQ & Coding) ──────────────────────────────────────
+    match /mcq_tests/{testId} {
+      allow read:                   if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── Test Questions ───────────────────────────────────────────
+    match /mcq_questions/{questionId} {
+      allow read:                   if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── Test Results & Proctoring ─────────────────────────────────
+    match /test_results/{resultId} {
+      allow read:                   if isSignedIn();
+      allow create:                 if isSignedIn();
+      allow update, delete:         if isAdmin();
+    }
+
+    // ── Daily Tasks ──────────────────────────────────────────────
+    match /daily_tasks/{taskId} {
+      allow read:                   if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── Notifications ────────────────────────────────────────────
+    match /notifications/{notifId} {
+      allow read:   if isSignedIn();
+      allow create: if true;
+      allow update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
   }
 }

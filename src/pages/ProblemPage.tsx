@@ -33,6 +33,59 @@ const JUDGE0_LANG_ID: Record<LangId, number> = {
   javascript: 63,   // JavaScript (Node.js 12.14.0)
 };
 
+// Language input guide — shown to users so they know how to read stdin
+const LANG_GUIDE: Record<LangId, { title: string; snippet: string; tip: string }> = {
+  python: {
+    title: 'Python — stdin reading',
+    snippet: `import sys
+input = sys.stdin.readline
+
+n = int(input())           # single integer
+arr = list(map(int, input().split()))  # array on one line
+s = input().strip()        # string`,
+    tip: 'Arrays are space-separated on a single line. Each input() call reads the next line.',
+  },
+  java: {
+    title: 'Java — Scanner / BufferedReader',
+    snippet: `import java.util.Scanner;
+public class Main {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        int n = sc.nextInt();             // single integer
+        int[] arr = new int[n];
+        for (int i = 0; i < n; i++)
+            arr[i] = sc.nextInt();        // space/newline separated
+        String s = sc.next();             // word
+    }
+}`,
+    tip: 'sc.nextInt() reads the next token (space or newline separated).',
+  },
+  c: {
+    title: 'C — scanf / printf',
+    snippet: `#include <stdio.h>
+int main() {
+    int n;
+    scanf("%d", &n);           // single integer
+    int arr[n];
+    for (int i = 0; i < n; i++)
+        scanf("%d", &arr[i]); // space-separated array
+    return 0;
+}`,
+    tip: 'scanf reads tokens separated by whitespace (space, newline, tab).',
+  },
+  javascript: {
+    title: 'JavaScript — stdin via readline',
+    snippet: `const lines = require('fs').readFileSync('/dev/stdin','utf8').split('\\n');
+let idx = 0;
+const readline = () => lines[idx++]?.trim() ?? '';
+
+const n = parseInt(readline());                     // single integer
+const arr = readline().split(' ').map(Number);      // array
+const s = readline();                               // string`,
+    tip: 'Each readline() call returns the next line. Split spaces for arrays.',
+  },
+};
+
 // Judge0 CE compiles Java as "Main.java" and runs "java Main".
 // Whatever class name the user types, we must rename it to Main.
 const JAVA_CLASS_REGEX = /public\s+class\s+\w+/g;
@@ -106,7 +159,7 @@ function useAntiCheat() {
 }
 
 // ── Real code execution via Judge0 CE (free public instance) ─────
-// Judge0 CE community instance — CORS-enabled, no API key required.
+// Uses ce.judge0.com with api.judge0.com as inline fallback.
 const JUDGE0_URL = 'https://ce.judge0.com';
 
 /** Normalise output for comparison: trim, collapse \r\n → \n, strip trailing blanks per line */
@@ -138,42 +191,49 @@ async function submitToJudge0(
   // Judge0 CE compiles Java as Main.java — class MUST be named Main
   const src = langId === 'java' ? normaliseJavaClassName(sourceCode) : sourceCode;
 
-  // 30-second timeout so the UI never hangs indefinitely
-  const controller = new AbortController();
-  const tid = setTimeout(() => controller.abort(), 30_000);
+  // Normalise stdin: ensure it ends with a newline so programs can read last line
+  const normalStdin = stdin.endsWith('\n') ? stdin : stdin + '\n';
 
-  try {
-    // Use wait=true — single request, Judge0 waits and returns the final result.
-    // No polling loop needed; simpler and more reliable.
-    const res = await fetch(
-      `${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`,
-      {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
+  const body = JSON.stringify({
+    source_code: src,
+    language_id: JUDGE0_LANG_ID[langId],
+    stdin: normalStdin,
+    cpu_time_limit: 5,
+    wall_time_limit: 10,
+    memory_limit: 128_000,
+  });
+
+  // Try primary then fallback CE instances
+  const endpoints = [JUDGE0_URL, 'https://api.judge0.com'];
+  let lastError: Error = new Error('No endpoint available');
+
+  for (const base of endpoints) {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(
+        `${base}/submissions?base64_encoded=false&wait=true`,
+        {
+          method: 'POST',
+          signal: controller.signal,
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body,
         },
-        body: JSON.stringify({
-          source_code: src,
-          language_id: JUDGE0_LANG_ID[langId],
-          stdin,
-          cpu_time_limit: 5,      // seconds
-          wall_time_limit: 10,    // hard wall-clock limit
-          memory_limit: 128_000,  // KB
-        }),
-      },
-    );
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Judge0 returned HTTP ${res.status}${text ? ': ' + text.slice(0, 120) : ''}`);
+      );
+      clearTimeout(tid);
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        lastError = new Error(`Judge0 HTTP ${res.status}${text ? ': ' + text.slice(0, 120) : ''}`);
+        continue; // try next endpoint
+      }
+      return res.json() as Promise<Judge0Response>;
+    } catch (e) {
+      clearTimeout(tid);
+      lastError = e instanceof Error ? e : new Error(String(e));
+      // try next endpoint
     }
-
-    return res.json() as Promise<Judge0Response>;
-  } finally {
-    clearTimeout(tid);
   }
+  throw lastError;
 }
 
 async function runCode(
@@ -246,6 +306,56 @@ async function runCode(
     testDetails,
   };
 }
+
+// ── Language Guide collapsible panel ─────────────────────────────
+const LangGuide: React.FC<{ lang: LangId }> = ({ lang }) => {
+  const [open, setOpen] = React.useState(false);
+  const g = LANG_GUIDE[lang];
+  return (
+    <div style={{
+      borderBottom: '1px solid var(--border)',
+      background: open ? 'rgba(139,92,246,0.06)' : 'rgba(5,5,15,0.6)',
+      transition: 'background 0.2s',
+    }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 16px', background: 'none', border: 'none', cursor: 'pointer',
+          color: 'var(--purple-light)', fontSize: 12, fontFamily: 'inherit', fontWeight: 600,
+          textAlign: 'left',
+        }}
+        title="How to read input / arrays in this language"
+      >
+        <BookOpen size={13} />
+        📖 How to read input in {g.title} {open ? '▲' : '▼'}
+        <span style={{ marginLeft: 'auto', color: 'var(--text-3)', fontWeight: 400, fontSize: 11 }}>
+          {open ? 'Hide guide' : 'Show input guide (arrays, strings, etc.)'}
+        </span>
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 14px', animation: 'fadeIn 0.15s ease' }}>
+          <p style={{ fontSize: 11, color: 'var(--cyan)', marginBottom: 8, fontWeight: 600 }}>
+            💡 {g.tip}
+          </p>
+          <pre style={{
+            margin: 0, fontSize: 11, lineHeight: 1.7,
+            background: 'rgba(0,0,0,0.4)', borderRadius: 6,
+            padding: '10px 14px', overflowX: 'auto', color: 'var(--text-1)',
+            fontFamily: 'JetBrains Mono, monospace',
+            border: '1px solid rgba(139,92,246,0.2)',
+          }}>
+            {g.snippet}
+          </pre>
+          <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>
+            ⚡ <strong>Test case format:</strong> Inputs are fed via stdin exactly as shown in examples.
+            Arrays are usually space-separated on one line. Each line = one {'"'}input(){'"'} call.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ── Component ─────────────────────────────────────────────────────
 const ProblemPage: React.FC = () => {
@@ -382,6 +492,7 @@ const ProblemPage: React.FC = () => {
         :                         50    // very slow
         : 0;
 
+      const todayDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD for dashboard daily queries
       await addDoc(collection(db, 'submissions'), {
         userId: user.uid,
         userName: profile.displayName,
@@ -392,6 +503,7 @@ const ProblemPage: React.FC = () => {
         status: result.status,
         runtime: result.runtime,
         score: baseScore,
+        todayDate,  // ← required for Dashboard daily task progress tracking
         createdAt: serverTimestamp(),
       });
 
@@ -754,6 +866,9 @@ const ProblemPage: React.FC = () => {
             </div>
           </div>
 
+          {/* ── Language Input Guide ── */}
+          <LangGuide lang={lang} />
+
           {/* Monaco Editor */}
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <Editor
@@ -792,7 +907,7 @@ const ProblemPage: React.FC = () => {
 
           {/* Output Panel */}
           {runResult && (
-            <div style={{ padding: 16, borderTop: '1px solid var(--border)', background: 'rgba(5,5,15,0.9)', maxHeight: 280, overflowY: 'auto' }}>
+            <div style={{ padding: 16, borderTop: '1px solid var(--border)', background: 'rgba(5,5,15,0.9)', maxHeight: 320, overflowY: 'auto' }}>
               <div className="flex items-center gap-2" style={{ marginBottom: 10 }}>
                 <Terminal size={14} color="var(--purple-light)" />
                 <span style={{ fontSize: 13, fontWeight: 600 }}>Output</span>
@@ -803,11 +918,12 @@ const ProblemPage: React.FC = () => {
                   : <span className="badge badge-yellow" style={{ fontSize: 10 }}>! Error</span>
                 }
                 <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--cyan)' }}>
-                  <Clock size={12} style={{ verticalAlign: 'middle' }} /> {runResult.runtime}ms
+                  <Clock size={12} style={{ verticalAlign: 'middle' }} /> {runResult.runtime}ms &nbsp;
+                  <span style={{ color: 'var(--text-3)' }}>{runResult.passed}/{runResult.total} passed</span>
                 </span>
               </div>
               {/* Summary line */}
-              <div className="terminal" style={{ fontSize: 12, marginBottom: 8 }}>
+              <div className="terminal" style={{ fontSize: 12, marginBottom: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 <span className={runResult.status === 'accepted' ? 'success' : 'error'}>
                   {runResult.output}
                 </span>
@@ -818,20 +934,29 @@ const ProblemPage: React.FC = () => {
                   {runResult.testDetails.map((t, i) => (
                     <div key={i} style={{
                       border: `1px solid ${t.passed ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
-                      borderRadius: 6, padding: '8px 12px', fontSize: 12,
+                      borderRadius: 6, padding: '10px 14px', fontSize: 12,
                       background: t.passed ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
                     }}>
-                      <div className="flex items-center gap-2" style={{ marginBottom: t.passed ? 0 : 4 }}>
+                      <div className="flex items-center gap-2" style={{ marginBottom: t.passed ? 0 : 6 }}>
                         {t.passed ? <CheckCircle2 size={12} color="var(--green)" /> : <XCircle size={12} color="var(--red)" />}
                         <span style={{ fontWeight: 600, color: t.passed ? 'var(--green)' : 'var(--red)' }}>
-                          Test {i + 1}: {t.passed ? 'Passed' : 'Failed'}
+                          Test {i + 1}: {t.passed ? 'Passed ✓' : 'Failed ✗'}
                         </span>
                       </div>
                       {!t.passed && (
-                        <div style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-2)', marginTop: 4 }}>
-                          <div>Input: <span style={{ color: 'var(--text-1)' }}>{t.input}</span></div>
-                          <div>Expected: <span style={{ color: 'var(--green)' }}>{t.expected}</span></div>
-                          <div>Got: <span style={{ color: 'var(--red)' }}>{t.got || '(no output)'}</span></div>
+                        <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 4, padding: '4px 8px' }}>
+                            <span style={{ color: 'var(--text-3)', fontSize: 10, display: 'block', marginBottom: 2 }}>INPUT</span>
+                            <span style={{ color: 'var(--text-1)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{t.input || '(empty)'}</span>
+                          </div>
+                          <div style={{ background: 'rgba(16,185,129,0.06)', borderRadius: 4, padding: '4px 8px' }}>
+                            <span style={{ color: 'var(--text-3)', fontSize: 10, display: 'block', marginBottom: 2 }}>EXPECTED</span>
+                            <span style={{ color: 'var(--green)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{t.expected || '(empty)'}</span>
+                          </div>
+                          <div style={{ background: 'rgba(239,68,68,0.06)', borderRadius: 4, padding: '4px 8px' }}>
+                            <span style={{ color: 'var(--text-3)', fontSize: 10, display: 'block', marginBottom: 2 }}>YOUR OUTPUT</span>
+                            <span style={{ color: 'var(--red)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{t.got || '(no output)'}</span>
+                          </div>
                         </div>
                       )}
                     </div>

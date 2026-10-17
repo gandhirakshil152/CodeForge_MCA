@@ -12,12 +12,14 @@ import {
   Save, X, AlertTriangle, UserCheck, UserX, Loader2,
   Database, CheckCircle2, Activity, Award, Clock, Zap,
   Eye, EyeOff, Table2, ThumbsUp, ThumbsDown, Calendar, ListChecks,
+  ClipboardList,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { Problem } from './ProblemsPage';
+import { AdminTestsTab } from '../components/AdminTestsTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type AdminTab = 'problems' | 'dbms' | 'users' | 'stats' | 'submissions' | 'daily_tasks';
+type AdminTab = 'problems' | 'dbms' | 'tests' | 'users' | 'stats' | 'submissions' | 'daily_tasks';
 
 interface DailyTask {
   id: string;
@@ -151,6 +153,7 @@ const AdminPage: React.FC = () => {
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string|null>(null);
+  const [testsCount, setTestsCount] = useState(0);
 
   useEffect(() => {
     if (!isAdmin) { navigate('/'); return; }
@@ -160,13 +163,14 @@ const AdminPage: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [pSnap, uSnap, dbmsSnap, subSnap, dbmsSubSnap, taskSnap] = await Promise.all([
+      const [pSnap, uSnap, dbmsSnap, subSnap, dbmsSubSnap, taskSnap, testSnap] = await Promise.all([
         getDocs(query(collection(db, 'problems'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'users')),
         getDocs(query(collection(db, 'dbms_questions'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'submissions')),
         getDocs(query(collection(db, 'dbms_submissions'), orderBy('submittedAt', 'desc'))),
         getDocs(query(collection(db, 'daily_tasks'), orderBy('date', 'desc'))),
+        getDocs(collection(db, 'mcq_tests')),
       ]);
       setProblems(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as Problem)));
       setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -176,6 +180,7 @@ const AdminPage: React.FC = () => {
       setAllSubmissions(subSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setDbmsSubmissions(dbmsSubs);
       setDailyTasks(taskSnap.docs.map(d => ({ id: d.id, ...d.data() } as DailyTask)));
+      setTestsCount(testSnap.size);
       setStats({
         totalUsers: uSnap.size, totalProblems: pSnap.size,
         totalDbms: dbmsSnap.size, totalSubmissions: subSnap.size,
@@ -413,16 +418,17 @@ const AdminPage: React.FC = () => {
   if (!isAdmin) return null;
 
   const TABS = [
-    { id: 'problems'    as AdminTab, label: 'Problems',    icon: <BookOpen size={14} />,   count: stats.totalProblems },
-    { id: 'dbms'        as AdminTab, label: 'DBMS',        icon: <Database size={14} />,   count: stats.totalDbms },
-    { id: 'submissions' as AdminTab, label: 'Submissions', icon: <Eye size={14} />,        count: stats.totalSubmissions + stats.totalDbmsSubmissions },
-    { id: 'users'       as AdminTab, label: 'Users',       icon: <Users size={14} />,      count: stats.totalUsers },
-    { id: 'daily_tasks' as AdminTab, label: 'Daily Tasks', icon: <Calendar size={14} />,  count: dailyTasks.length },
-    { id: 'stats'       as AdminTab, label: 'Analytics',   icon: <BarChart2 size={14} /> },
+    { id: 'problems'    as AdminTab, label: 'Problems',        icon: <BookOpen size={14} />,   count: stats.totalProblems },
+    { id: 'dbms'        as AdminTab, label: 'DBMS',            icon: <Database size={14} />,   count: stats.totalDbms },
+    { id: 'tests'       as AdminTab, label: 'Placement Tests', icon: <ClipboardList size={14} />, count: testsCount },
+    { id: 'submissions' as AdminTab, label: 'Submissions',     icon: <Eye size={14} />,        count: stats.totalSubmissions + stats.totalDbmsSubmissions },
+    { id: 'users'       as AdminTab, label: 'Users',           icon: <Users size={14} />,      count: stats.totalUsers },
+    { id: 'daily_tasks' as AdminTab, label: 'Daily Tasks',     icon: <Calendar size={14} />,  count: dailyTasks.length },
+    { id: 'stats'       as AdminTab, label: 'Analytics',       icon: <BarChart2 size={14} /> },
   ];
 
   const tabAccent = (id: AdminTab) =>
-    id === 'dbms' ? 'var(--cyan)' : id === 'stats' ? 'var(--yellow)' : id === 'users' ? 'var(--pink)' : id === 'submissions' ? 'var(--green)' : id === 'daily_tasks' ? 'var(--cyan)' : 'var(--purple-light)';
+    id === 'dbms' ? 'var(--cyan)' : id === 'tests' ? 'var(--yellow)' : id === 'stats' ? 'var(--yellow)' : id === 'users' ? 'var(--pink)' : id === 'submissions' ? 'var(--green)' : id === 'daily_tasks' ? 'var(--cyan)' : 'var(--purple-light)';
 
   return (
     <>
@@ -499,7 +505,7 @@ const AdminPage: React.FC = () => {
           </div>
 
           {/* ── Tab Bar ─────────────────────────────────────────── */}
-          <div style={{ display: 'flex', gap: 3, marginBottom: 24, background: 'rgba(0,0,0,0.38)', borderRadius: 14, padding: 5, border: '1px solid var(--border)', width: 'fit-content', flexWrap: 'wrap' }}>
+          <div className="admin-tab-bar">
             {TABS.map(t => {
               const active = tab === t.id;
               const accent = tabAccent(t.id);
@@ -536,7 +542,7 @@ const AdminPage: React.FC = () => {
                     </h2>
                     <button className="btn btn-ghost btn-sm" onClick={resetForm}><X size={13} /> Cancel</button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div className="admin-analytics-grid">
                     <div style={{ gridColumn: '1/-1' }}>
                       <label>Problem Title *</label>
                       <input className="input" placeholder="e.g. Two Sum" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} />
@@ -710,7 +716,7 @@ const AdminPage: React.FC = () => {
                     </h2>
                     <button className="btn btn-ghost btn-sm" onClick={resetDbmsForm}><X size={13} /> Cancel</button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div className="admin-analytics-grid">
                     <div style={{ gridColumn: '1/-1' }}>
                       <label>Question Title *</label>
                       <input className="input" placeholder="e.g. Find employees with salary > 50000"
@@ -1167,7 +1173,7 @@ const AdminPage: React.FC = () => {
                 ))}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="admin-analytics-grid">
                 {/* Top performers */}
                 <div className="glass-card" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
@@ -1247,6 +1253,11 @@ const AdminPage: React.FC = () => {
             </div>
           )}
 
+          {/* ══════════════ PLACEMENT TESTS TAB ══════════════ */}
+          {tab === 'tests' && (
+            <AdminTestsTab users={users} onRefresh={loadData} />
+          )}
+
           {/* ══════════════ DAILY TASKS TAB ══════════════ */}
           {tab === 'daily_tasks' && (
             <>
@@ -1260,7 +1271,7 @@ const AdminPage: React.FC = () => {
                     </h2>
                     <button className="btn btn-ghost btn-sm" onClick={resetTaskForm}><X size={13} /> Cancel</button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="admin-form-grid">
                     <div style={{ gridColumn: '1/-1' }}>
                       <label>Task Title *</label>
                       <input className="input" placeholder="e.g. Solve 2 problems today" value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} />

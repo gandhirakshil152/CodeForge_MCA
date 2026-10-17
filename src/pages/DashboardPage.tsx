@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
-  collection, getDocs, query, where, orderBy, limit,
+  collection, getDocs, query, where,
   doc, onSnapshot,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -10,7 +10,7 @@ import Navbar from "../components/Navbar";
 import {
   Code2, Trophy, Zap, Clock, CheckCircle2, XCircle,
   Target, TrendingUp, BookOpen, Star, Database, RefreshCw,
-  Flame, Calendar, ListChecks, ChevronRight,
+  Flame, Calendar, ListChecks, ChevronRight, AlertCircle,
 } from "lucide-react";
 
 interface Submission {
@@ -70,6 +70,7 @@ const DashboardPage: React.FC = () => {
   const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
   const [todayCodeSolves, setTodayCodeSolves] = useState(0);
   const [todayDbmsPasses, setTodayDbmsPasses] = useState(0);
+  const [pendingProblems, setPendingProblems] = useState(0); // attempted but not solved
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -86,26 +87,19 @@ const DashboardPage: React.FC = () => {
   const fetchData = useCallback(async () => {
     if (!user) return;
     try {
+      // Use simple single-field queries to avoid Firestore composite index errors.
+      // All multi-field filtering is done client-side.
       const [
         allSubSnap,
-        recentSubSnap,
         probSnap,
         dbmsSnap,
         dbmsSubSnap,
         dailyTaskSnap,
-        todayCodeSnap,
-        todayDbmsSnap,
       ] = await Promise.all([
+        // All user submissions (no orderBy to avoid index requirement)
         getDocs(query(
           collection(db, "submissions"),
           where("userId", "==", user.uid),
-          orderBy("createdAt", "desc"),
-        )),
-        getDocs(query(
-          collection(db, "submissions"),
-          where("userId", "==", user.uid),
-          orderBy("createdAt", "desc"),
-          limit(10),
         )),
         getDocs(collection(db, "problems")),
         getDocs(collection(db, "dbms_questions")),
@@ -118,27 +112,23 @@ const DashboardPage: React.FC = () => {
           collection(db, "daily_tasks"),
           where("date", "==", today),
         )),
-        // Today's accepted code submissions (for daily task progress)
-        getDocs(query(
-          collection(db, "submissions"),
-          where("userId", "==", user.uid),
-          where("status", "==", "accepted"),
-          where("todayDate", "==", today),
-        )),
-        // Today's DBMS passes
-        getDocs(query(
-          collection(db, "dbms_submissions"),
-          where("userId", "==", user.uid),
-          where("status", "==", "pass"),
-          where("todayDate", "==", today),
-        )),
       ]);
 
-      setAllSubmissions(allSubSnap.docs.map(d => ({ id: d.id, ...d.data() } as Submission)));
-      setRecentSubmissions(recentSubSnap.docs.map(d => ({ id: d.id, ...d.data() } as Submission)));
+      // Client-side: sort submissions by createdAt desc
+      const allSubs: Submission[] = allSubSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Submission))
+        .sort((a, b) => {
+          const ta = a.createdAt?.toDate?.()?.getTime?.() ?? (typeof a.createdAt === 'number' ? a.createdAt : 0);
+          const tb = b.createdAt?.toDate?.()?.getTime?.() ?? (typeof b.createdAt === 'number' ? b.createdAt : 0);
+          return tb - ta;
+        });
+
+      setAllSubmissions(allSubs);
+      setRecentSubmissions(allSubs.slice(0, 10));
       setTotalProblems(probSnap.size);
       setTotalDbms(dbmsSnap.size);
 
+      // DBMS passed (unique questions)
       const passedQIds = new Set<string>();
       dbmsSubSnap.docs.forEach(d => {
         const data = d.data() as any;
@@ -147,10 +137,37 @@ const DashboardPage: React.FC = () => {
       setDbmsPassed(passedQIds.size);
 
       setDailyTasks(dailyTaskSnap.docs.map(d => ({ id: d.id, ...d.data() } as DailyTask)));
-      setTodayCodeSolves(todayCodeSnap.size);
-      setTodayDbmsPasses(todayDbmsSnap.size);
 
-    } catch (err) { console.error(err); }
+      // Today stats: filter client-side by todayDate or createdAt date
+      const todayStr = today;
+      const todayAccepted = allSubs.filter(s => {
+        if (s.status !== 'accepted') return false;
+        // Check todayDate field (new submissions) or fallback to createdAt date
+        if ((s as any).todayDate) return (s as any).todayDate === todayStr;
+        const d = s.createdAt?.toDate?.();
+        if (d) return d.toISOString().slice(0, 10) === todayStr;
+        return false;
+      });
+      setTodayCodeSolves(todayAccepted.length);
+
+      // DBMS today passes
+      const dbmsTodayPass = dbmsSubSnap.docs.filter(d => {
+        const data = d.data() as any;
+        if (data.status !== 'pass') return false;
+        if (data.todayDate) return data.todayDate === todayStr;
+        const dt = data.createdAt?.toDate?.();
+        if (dt) return dt.toISOString().slice(0, 10) === todayStr;
+        return false;
+      });
+      setTodayDbmsPasses(dbmsTodayPass.length);
+
+      // Pending: problems attempted (any status) but not yet accepted
+      const acceptedProbIds = new Set(allSubs.filter(s => s.status === 'accepted').map(s => s.problemId));
+      const attemptedProbIds = new Set(allSubs.map(s => s.problemId));
+      const pending = [...attemptedProbIds].filter(pid => !acceptedProbIds.has(pid)).length;
+      setPendingProblems(pending);
+
+    } catch (err) { console.error('Dashboard fetch error:', err); }
     finally { setLoading(false); setRefreshing(false); }
   }, [user]);
 
@@ -165,14 +182,12 @@ const DashboardPage: React.FC = () => {
     fetchData();
   };
 
+
   // ── Derived stats ────────────────────────────────────────────────
   const codeSubs      = allSubmissions;
   const acceptedSubs  = codeSubs.filter(s => s.status === "accepted");
   const totalSubs     = codeSubs.length;
   const accuracy      = totalSubs > 0 ? Math.round((acceptedSubs.length / totalSubs) * 100) : 0;
-  const avgRuntime    = acceptedSubs.length > 0
-    ? Math.round(acceptedSubs.reduce((a, s) => a + (s.runtime || 0), 0) / acceptedSubs.length)
-    : 0;
 
   // Unique code problems solved (from profile = authoritative)
   const problemsSolved    = freshProfile?.problemsSolved ?? 0;
@@ -199,31 +214,33 @@ const DashboardPage: React.FC = () => {
       gradient: "linear-gradient(135deg, rgba(16,185,129,0.2), rgba(16,185,129,0.05))",
     },
     {
-      label: "Total Score", value: totalScore,
-      icon: <Star size={20} />, color: "var(--yellow)",
+      label: "Pending", value: pendingProblems,
+      icon: <AlertCircle size={20} />, color: "var(--yellow)",
       gradient: "linear-gradient(135deg, rgba(245,158,11,0.2), rgba(245,158,11,0.05))",
+      tooltip: "Problems attempted but not yet accepted",
     },
     {
-      label: "Submissions", value: totalSubmissions,
-      icon: <Zap size={20} />, color: "var(--purple-light)",
+      label: "Total Score", value: totalScore,
+      icon: <Star size={20} />, color: "var(--purple-light)",
       gradient: "linear-gradient(135deg, rgba(139,92,246,0.2), rgba(139,92,246,0.05))",
     },
     {
-      label: "Accuracy", value: `${accuracy}%`,
-      icon: <Target size={20} />, color: "var(--pink)",
+      label: "Submissions", value: totalSubmissions,
+      icon: <Zap size={20} />, color: "var(--pink)",
       gradient: "linear-gradient(135deg, rgba(236,72,153,0.2), rgba(236,72,153,0.05))",
     },
     {
-      label: "Avg Runtime", value: `${avgRuntime}ms`,
-      icon: <Clock size={20} />, color: "var(--text-2)",
-      gradient: "linear-gradient(135deg, rgba(148,163,184,0.1), rgba(148,163,184,0.02))",
+      label: "Accuracy", value: `${accuracy}%`,
+      icon: <Target size={20} />, color: "var(--cyan)",
+      gradient: "linear-gradient(135deg, rgba(34,211,238,0.2), rgba(34,211,238,0.05))",
     },
     {
       label: "Best Runtime", value: bestRuntime > 0 ? `${bestRuntime}ms` : "—",
-      icon: <TrendingUp size={20} />, color: "var(--cyan)",
-      gradient: "linear-gradient(135deg, rgba(34,211,238,0.2), rgba(34,211,238,0.05))",
+      icon: <TrendingUp size={20} />, color: "var(--text-2)",
+      gradient: "linear-gradient(135deg, rgba(148,163,184,0.1), rgba(148,163,184,0.02))",
     },
   ];
+
 
   return (
     <>
@@ -266,7 +283,7 @@ const DashboardPage: React.FC = () => {
           </div>
 
           {/* ── Top row: Progress + Streak ────────────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, marginBottom: 24 }}>
+          <div className="dashboard-top-row">
             {/* Placement Readiness */}
             <div className="glass-card" style={{ padding: 24 }}>
               <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
@@ -428,7 +445,7 @@ const DashboardPage: React.FC = () => {
           </div>
 
           {/* ── Recent Activity + Quick Actions ──────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 290px", gap: 24, alignItems: "start" }}>
+          <div className="dashboard-bottom-row">
 
             {/* Recent Submissions */}
             <div>

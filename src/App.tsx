@@ -13,6 +13,8 @@ import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
 import DBMSPage from './pages/DBMSPage';
 import PPTQuizPage from './pages/PPTQuizPage';
+import TestsPage from './pages/TestsPage';
+import TestPage from './pages/TestPage';
 
 // Route guard for authenticated pages
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -56,6 +58,9 @@ const AppRoutes: React.FC = () => (
     <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
     <Route path="/dbms" element={<DBMSPage />} />
     <Route path="/ppt-quiz" element={<PPTQuizPage />} />
+    <Route path="/tests" element={<PrivateRoute><TestsPage /></PrivateRoute>} />
+    <Route path="/tests/:testId" element={<PrivateRoute><TestPage /></PrivateRoute>} />
+    <Route path="/test/:testId" element={<PrivateRoute><TestPage /></PrivateRoute>} />
     {/* Admin panel */}
     <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
     <Route path="/admin-panel" element={<AdminRoute><AdminPage /></AdminRoute>} />

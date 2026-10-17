@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   collection, getDocs, query, orderBy, addDoc, serverTimestamp,
 } from "firebase/firestore";
@@ -69,6 +69,17 @@ const DBMSPage: React.FC = () => {
           });
           setSolved(solvedIds);
           setPending(pendingIds);
+        }
+
+        // Auto-expand question if passed via ?q= URL query parameter (e.g. from Daily Tasks)
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetQ = urlParams.get('q');
+        if (targetQ) {
+          setExpanded(prev => ({ ...prev, [targetQ]: true }));
+          setTimeout(() => {
+            const el = document.getElementById(`q-${targetQ}`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 350);
         }
       } catch (err) { console.error(err); }
       finally { setLoading(false); }
@@ -212,7 +223,7 @@ const DBMSPage: React.FC = () => {
                   : "1px solid var(--border)";
 
                 return (
-                  <div key={q.id} className="glass-card" style={{ padding: 0, overflow: "hidden", border: cardBorder, transition: "all 0.2s" }}>
+                  <div key={q.id} id={`q-${q.id}`} className="glass-card" style={{ padding: 0, overflow: "hidden", border: cardBorder, transition: "all 0.2s" }}>
                     <button onClick={() => toggle(q.id, setExpanded)} style={{ width: "100%", background: "none", border: "none", padding: "16px 20px", cursor: "pointer", textAlign: "left" }}>
                       <div className="flex items-center justify-between gap-3" style={{ flexWrap: "wrap" }}>
                         <div className="flex items-center gap-3 flex-1" style={{ minWidth: 0 }}>
