@@ -126,7 +126,9 @@ export const AdminTestsTab: React.FC<AdminTestsTabProps> = ({ users = [] }) => {
   // Live Monitor Modal
   const [monitoringTest, setMonitoringTest] = useState<MCQTest | null>(null);
   const [liveResults, setLiveResults] = useState<any[]>([]);
+  const [liveProgress, setLiveProgress] = useState<any[]>([]);
   const [monitorLoading, setMonitorLoading] = useState(false);
+  const [monitorViewTab, setMonitorViewTab] = useState<'all' | 'live' | 'shuffled'>('all');
 
   // Live Leaderboard Modal
   const [leaderboardTest, setLeaderboardTest] = useState<MCQTest | null>(null);
@@ -144,9 +146,13 @@ export const AdminTestsTab: React.FC<AdminTestsTabProps> = ({ users = [] }) => {
     return unsub;
   }, []);
 
-  // Real-time monitor listener
+  // Real-time monitor listener (test_results + test_live_progress)
   useEffect(() => {
-    if (!monitoringTest) return;
+    if (!monitoringTest) {
+      setLiveResults([]);
+      setLiveProgress([]);
+      return;
+    }
     setMonitorLoading(true);
     const q = query(
       collection(db, 'test_results'),
@@ -154,16 +160,28 @@ export const AdminTestsTab: React.FC<AdminTestsTabProps> = ({ users = [] }) => {
     );
     const unsub = onSnapshot(q, snap => {
       const res = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // Sort client-side by submittedAt desc
+      // Sort by score desc, then timeTaken asc so points shuffle in real-time!
       res.sort((a: any, b: any) => {
-        const ta = a.submittedAt?.toDate?.()?.getTime?.() || 0;
-        const tb = b.submittedAt?.toDate?.()?.getTime?.() || 0;
-        return tb - ta;
+        if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
+        return (a.timeTaken || 0) - (b.timeTaken || 0);
       });
       setLiveResults(res);
       setMonitorLoading(false);
     });
-    return unsub;
+
+    const progQ = query(
+      collection(db, 'test_live_progress'),
+      where('testId', '==', monitoringTest.id)
+    );
+    const progUnsub = onSnapshot(progQ, snap => {
+      const prog = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setLiveProgress(prog);
+    });
+
+    return () => {
+      unsub();
+      progUnsub();
+    };
   }, [monitoringTest]);
 
   // Real-time leaderboard listener
@@ -1344,138 +1362,292 @@ export const AdminTestsTab: React.FC<AdminTestsTabProps> = ({ users = [] }) => {
       {/* ══════════════════════════════════════════════════════════════
           FACULTY LIVE MONITORING MODAL
       ══════════════════════════════════════════════════════════════ */}
-      {monitoringTest && (
-        <div className="modal-overlay" onClick={() => setMonitoringTest(null)}>
-          <div className="modal" style={{ maxWidth: 900 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: 'var(--red)', animation: 'pulse 1.5s infinite' }} />
-                  <h3 style={{ fontWeight: 800, fontSize: 18, color: 'var(--text-1)' }}>
-                    Faculty Live Monitor — {monitoringTest.title}
-                  </h3>
-                </div>
-                <p style={{ color: 'var(--text-3)', fontSize: 12, marginTop: 2 }}>
-                  Real-time anti-cheat detection, tab switch warnings &amp; student submission monitor
-                </p>
-              </div>
+      {monitoringTest && (() => {
+        const submittedUserIds = new Set(liveResults.map(r => r.userId));
+        const activeStudents = liveProgress.filter(p => !submittedUserIds.has(p.userId) && p.status !== 'submitted');
 
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => exportResultsToCsv(monitoringTest, liveResults)}
-                  title="Export results to CSV"
-                >
-                  <Download size={13} /> Export CSV
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setMonitoringTest(null)}><X size={15} /></button>
-              </div>
-            </div>
-
-            <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
-              {/* Live KPI Cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 18 }}>
-                {[
-                  { label: 'Total Submitted', val: liveResults.length, color: 'var(--purple-light)' },
-                  { label: 'Passed', val: liveResults.filter(r => r.passed).length, color: 'var(--green)' },
-                  { label: 'Failed', val: liveResults.filter(r => !r.passed).length, color: 'var(--red)' },
-                  {
-                    label: 'Avg Score',
-                    val: liveResults.length > 0 ? `${Math.round(liveResults.reduce((a, c) => a + (c.percentage || 0), 0) / liveResults.length)}%` : '0%',
-                    color: 'var(--cyan)',
-                  },
-                  {
-                    label: 'Tab Violations',
-                    val: liveResults.reduce((a, c) => a + (c.warnings || 0), 0),
-                    color: 'var(--yellow)',
-                  },
-                ].map(s => (
-                  <div key={s.label} className="glass-card" style={{ padding: '12px 14px', textAlign: 'center' }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: s.color, fontFamily: 'Syne,sans-serif' }}>{s.val}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{s.label}</div>
+        return (
+          <div className="modal-overlay" onClick={() => setMonitoringTest(null)}>
+            <div className="modal" style={{ maxWidth: 960, width: '95%' }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: 'var(--red)', animation: 'pulse 1.5s infinite' }} />
+                    <h3 style={{ fontWeight: 800, fontSize: 18, color: 'var(--text-1)' }}>
+                      Faculty Live Proctor & Monitor — {monitoringTest.title}
+                    </h3>
                   </div>
-                ))}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginTop: 6, fontSize: 12 }}>
+                    <span style={{ background: 'rgba(56,189,248,0.12)', color: 'var(--cyan)', border: '1px solid rgba(56,189,248,0.3)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                      👨‍🏫 Assigned Faculty: {monitoringTest.assignedTeacher || 'All MCA Department Faculty'}
+                    </span>
+                    <span style={{ background: 'rgba(129,140,248,0.12)', color: 'var(--purple-light)', border: '1px solid rgba(129,140,248,0.3)', padding: '2px 8px', borderRadius: 6 }}>
+                      🎓 Target: {monitoringTest.assignedClass || 'All MCA Batches'}
+                    </span>
+                    <span style={{ color: 'var(--text-3)' }}>
+                      Pass Mark: {monitoringTest.passingScore}% • Anti-cheat: Active
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => exportResultsToCsv(monitoringTest, liveResults)}
+                    title="Export results to CSV"
+                  >
+                    <Download size={13} /> Export CSV
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setMonitoringTest(null)}><X size={15} /></button>
+                </div>
               </div>
 
-              {/* Candidates Table */}
-              {monitorLoading && liveResults.length === 0 ? (
-                <div style={{ padding: 40, textAlign: 'center' }}>
-                  <div className="spinner" style={{ margin: '0 auto 10px' }} />
-                  <p style={{ color: 'var(--text-3)' }}>Connecting to live monitor stream...</p>
+              <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
+                {/* Live KPI Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 16 }}>
+                  {[
+                    { label: 'Taking Live Now', val: activeStudents.length, color: 'var(--green)' },
+                    { label: 'Submitted', val: liveResults.length, color: 'var(--purple-light)' },
+                    { label: 'Passed', val: liveResults.filter(r => r.passed).length, color: 'var(--cyan)' },
+                    { label: 'Failed', val: liveResults.filter(r => !r.passed).length, color: 'var(--red)' },
+                    {
+                      label: 'Avg Score',
+                      val: liveResults.length > 0 ? `${Math.round(liveResults.reduce((a, c) => a + (c.percentage || 0), 0) / liveResults.length)}%` : '0%',
+                      color: 'var(--yellow)',
+                    },
+                    {
+                      label: 'Tab Violations',
+                      val: liveResults.reduce((a, c) => a + (c.warnings || 0), 0),
+                      color: 'var(--red)',
+                    },
+                  ].map(s => (
+                    <div key={s.label} className="glass-card" style={{ padding: '12px 14px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: s.color, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.val}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{s.label}</div>
+                    </div>
+                  ))}
                 </div>
-              ) : liveResults.length === 0 ? (
-                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
-                  <Clock size={32} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
-                  <p>No student submissions recorded yet.</p>
-                  <p style={{ fontSize: 12, marginTop: 4 }}>Submissions will appear here in real-time as students finish.</p>
-                </div>
-              ) : (
-                <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
-                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', textAlign: 'left' }}>
-                    <thead>
-                      <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)', color: 'var(--text-3)' }}>
-                        <th style={{ padding: '10px 12px' }}>#</th>
-                        <th style={{ padding: '10px 12px' }}>Student</th>
-                        <th style={{ padding: '10px 12px' }}>Score</th>
-                        <th style={{ padding: '10px 12px' }}>Status</th>
-                        <th style={{ padding: '10px 12px' }}>Tab Switches</th>
-                        <th style={{ padding: '10px 12px' }}>Time Taken</th>
-                        <th style={{ padding: '10px 12px' }}>Submitted At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {liveResults.map((r, i) => (
-                        <tr key={r.id || i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                          <td style={{ padding: '10px 12px', color: 'var(--text-3)' }}>{i + 1}</td>
-                          <td style={{ padding: '10px 12px' }}>
-                            <div style={{ fontWeight: 600, color: 'var(--text-1)' }}>{r.userName || 'Student'}</div>
-                            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{r.userEmail || ''}</div>
-                          </td>
-                          <td style={{ padding: '10px 12px' }}>
-                            <div style={{ fontWeight: 700, color: r.passed ? 'var(--green)' : 'var(--red)' }}>
-                              {r.score}/{r.totalMarks} ({r.percentage}%)
-                            </div>
-                            <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
-                              ✓ {r.correct || 0} | ✗ {r.incorrect || 0}
-                            </div>
-                          </td>
-                          <td style={{ padding: '10px 12px' }}>
-                            <span className={`badge ${r.passed ? 'badge-green' : 'badge-red'}`} style={{ fontSize: 10 }}>
-                              {r.passed ? 'PASSED' : 'FAILED'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '10px 12px' }}>
-                            {r.warnings && r.warnings > 0 ? (
-                              <span style={{ color: r.warnings >= 3 ? 'var(--red)' : 'var(--yellow)', fontWeight: 600 }}>
-                                ⚠️ {r.warnings} switch{r.warnings > 1 ? 'es' : ''} {r.autoSubmitted ? '(Auto-submitted)' : ''}
-                              </span>
-                            ) : (
-                              <span style={{ color: 'var(--green)', fontSize: 11 }}>✓ 0 (Clean)</span>
-                            )}
-                          </td>
-                          <td style={{ padding: '10px 12px', color: 'var(--text-2)' }}>
-                            {r.timeTaken ? `${Math.floor(r.timeTaken / 60)}m ${r.timeTaken % 60}s` : '—'}
-                          </td>
-                          <td style={{ padding: '10px 12px', color: 'var(--text-3)' }}>
-                            {r.submittedAt?.toDate ? r.submittedAt.toDate().toLocaleTimeString() : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
 
-            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                🔴 Live proctoring stream active • auto-updates on student submissions
-              </span>
-              <button className="btn btn-ghost" onClick={() => setMonitoringTest(null)}>Close</button>
+                {/* Real-time Shuffle Notification Notice */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '8px 14px',
+                  background: 'rgba(56,189,248,0.06)',
+                  border: '1px solid rgba(56,189,248,0.2)',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: 12,
+                  color: 'var(--text-2)',
+                  marginBottom: 16
+                }}>
+                  <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', animation: 'pulse 1s infinite' }} />
+                  <span><strong>Live Shuffling Leaderboard:</strong> Scores and ranks automatically re-order and shuffle in real-time as each student completes their test.</span>
+                </div>
+
+                {/* Filter Tabs */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      background: monitorViewTab === 'all' ? 'var(--blue)' : 'rgba(255,255,255,0.04)',
+                      color: '#fff',
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                    onClick={() => setMonitorViewTab('all')}
+                  >
+                    Combined Live View
+                  </button>
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      background: monitorViewTab === 'live' ? 'var(--blue)' : 'rgba(255,255,255,0.04)',
+                      color: '#fff',
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                    onClick={() => setMonitorViewTab('live')}
+                  >
+                    🔴 Live In-Progress ({activeStudents.length})
+                  </button>
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      background: monitorViewTab === 'shuffled' ? 'var(--blue)' : 'rgba(255,255,255,0.04)',
+                      color: '#fff',
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                    onClick={() => setMonitorViewTab('shuffled')}
+                  >
+                    🏆 Shuffled Ranks ({liveResults.length})
+                  </button>
+                </div>
+
+                {/* Section 1: Live In-Progress Candidates (Faculty Monitoring) */}
+                {(monitorViewTab === 'all' || monitorViewTab === 'live') && (
+                  <div style={{ marginBottom: 24 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', animation: 'pulse 1.2s infinite' }} />
+                        Candidates In-Progress Right Now ({activeStudents.length})
+                      </h4>
+                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Real-time question sync & tab focus tracker</span>
+                    </div>
+
+                    {activeStudents.length === 0 ? (
+                      <div className="glass-card" style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+                        No candidates are actively answering right now. When students begin the test, their live question progress will stream here.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+                        {activeStudents.map((p, idx) => {
+                          const total = p.totalQuestions || monitoringTest.totalQuestions || 1;
+                          const answered = p.answeredCount || 0;
+                          const pct = Math.min(100, Math.round((answered / total) * 100));
+                          const currQ = (p.currentQuestionIndex ?? 0) + 1;
+
+                          return (
+                            <div key={p.userId || idx} className="glass-card" style={{ padding: 12, border: '1px solid rgba(56,189,248,0.25)', background: 'rgba(11,23,48,0.6)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <div>
+                                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-1)' }}>{p.userName || 'Student'}</div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{p.userEmail || ''}</div>
+                                </div>
+                                <span className="badge badge-green" style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)' }} /> Live
+                                </span>
+                              </div>
+
+                              <div style={{ marginTop: 10 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+                                  <span style={{ color: 'var(--text-2)' }}>Progress: {answered}/{total} Answered</span>
+                                  <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{pct}%</span>
+                                </div>
+                                <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
+                                  <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, var(--cyan), var(--blue))', transition: 'width 0.3s ease' }} />
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, fontSize: 11 }}>
+                                <span style={{ color: 'var(--purple-light)', fontWeight: 600 }}>
+                                  📍 At Question #{currQ}
+                                </span>
+                                {p.tabSwitches && p.tabSwitches > 0 ? (
+                                  <span style={{ color: 'var(--red)', fontWeight: 600 }}>
+                                    ⚠️ {p.tabSwitches} Tab switch{p.tabSwitches > 1 ? 'es' : ''}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--green)' }}>✓ Focused</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Section 2: Real-time Shuffled Submissions Leaderboard */}
+                {(monitorViewTab === 'all' || monitorViewTab === 'shuffled') && (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Trophy size={15} color="var(--yellow)" />
+                        Real-time Shuffled Leaderboard ({liveResults.length} Submissions)
+                      </h4>
+                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Sorted by score &amp; speed (Ranks shuffle live)</span>
+                    </div>
+
+                    {monitorLoading && liveResults.length === 0 ? (
+                      <div style={{ padding: 40, textAlign: 'center' }}>
+                        <div className="spinner" style={{ margin: '0 auto 10px' }} />
+                        <p style={{ color: 'var(--text-3)' }}>Connecting to live monitor stream...</p>
+                      </div>
+                    ) : liveResults.length === 0 ? (
+                      <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
+                        <Clock size={32} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                        <p>No student submissions recorded yet.</p>
+                        <p style={{ fontSize: 12, marginTop: 4 }}>Submissions will shuffle here in real-time as candidates finish.</p>
+                      </div>
+                    ) : (
+                      <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', textAlign: 'left' }}>
+                          <thead>
+                            <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)', color: 'var(--text-3)' }}>
+                              <th style={{ padding: '10px 12px' }}>Rank</th>
+                              <th style={{ padding: '10px 12px' }}>Candidate</th>
+                              <th style={{ padding: '10px 12px' }}>Score</th>
+                              <th style={{ padding: '10px 12px' }}>Status</th>
+                              <th style={{ padding: '10px 12px' }}>Anti-Cheat Violations</th>
+                              <th style={{ padding: '10px 12px' }}>Time Taken</th>
+                              <th style={{ padding: '10px 12px' }}>Submitted</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {liveResults.map((r, i) => {
+                              const isTop3 = i < 3;
+                              const medal = i === 0 ? '🥇 #1' : i === 1 ? '🥈 #2' : i === 2 ? '🥉 #3' : `#${i + 1}`;
+                              return (
+                                <tr key={r.id || i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', background: isTop3 ? 'rgba(56,189,248,0.04)' : 'transparent' }}>
+                                  <td style={{ padding: '10px 12px', fontWeight: 800, color: isTop3 ? 'var(--yellow)' : 'var(--text-3)' }}>
+                                    {medal}
+                                  </td>
+                                  <td style={{ padding: '10px 12px' }}>
+                                    <div style={{ fontWeight: 600, color: 'var(--text-1)' }}>{r.userName || 'Student'}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{r.userEmail || ''}</div>
+                                  </td>
+                                  <td style={{ padding: '10px 12px' }}>
+                                    <div style={{ fontWeight: 700, color: r.passed ? 'var(--green)' : 'var(--red)', fontSize: 13 }}>
+                                      {r.score}/{r.totalMarks} ({r.percentage}%)
+                                    </div>
+                                    <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
+                                      ✓ {r.correct || 0} | ✗ {r.incorrect || 0}
+                                    </div>
+                                  </td>
+                                  <td style={{ padding: '10px 12px' }}>
+                                    <span className={`badge ${r.passed ? 'badge-green' : 'badge-red'}`} style={{ fontSize: 10 }}>
+                                      {r.passed ? 'PASSED' : 'FAILED'}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '10px 12px' }}>
+                                    {r.warnings && r.warnings > 0 ? (
+                                      <span style={{ color: r.warnings >= 3 ? 'var(--red)' : 'var(--yellow)', fontWeight: 600 }}>
+                                        ⚠️ {r.warnings} switch{r.warnings > 1 ? 'es' : ''} {r.autoSubmitted ? '(Auto-submitted)' : ''}
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: 'var(--green)', fontSize: 11 }}>✓ 0 (Clean)</span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '10px 12px', color: 'var(--text-2)' }}>
+                                    {r.timeTaken ? `${Math.floor(r.timeTaken / 60)}m ${r.timeTaken % 60}s` : '—'}
+                                  </td>
+                                  <td style={{ padding: '10px 12px', color: 'var(--text-3)' }}>
+                                    {r.submittedAt?.toDate ? r.submittedAt.toDate().toLocaleTimeString() : '—'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  🔴 Live streaming active • Ranks shuffle dynamically on student submissions
+                </span>
+                <button className="btn btn-ghost" onClick={() => setMonitoringTest(null)}>Close</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ══════════════════════════════════════════════════════════════
           LIVE MCQ LEADERBOARD MODAL
@@ -1546,7 +1718,7 @@ export const AdminTestsTab: React.FC<AdminTestsTabProps> = ({ users = [] }) => {
                         </div>
 
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: 16, fontWeight: 800, color: r.passed ? 'var(--green)' : 'var(--yellow)', fontFamily: 'Syne,sans-serif' }}>
+                          <div style={{ fontSize: 16, fontWeight: 800, color: r.passed ? 'var(--green)' : 'var(--yellow)', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                             {r.score} / {r.totalMarks}
                           </div>
                           <div style={{ fontSize: 11, color: 'var(--text-3)' }}>

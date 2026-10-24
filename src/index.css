@@ -1,38 +1,43 @@
 /* ============================================================
    CodeForge MCA — Global CSS Design System
-   Gen Z Dark Theme: Neon Purple + Cyan + Pink
+   Academic Deep Blue Theme: Deep Midnight Navy + Royal Blue + Cyan
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
 
 /* ── CSS Variables ─────────────────────────────────────────── */
 :root {
-  --bg-deep:      #05050f;
-  --bg-card:      rgba(14, 14, 35, 0.8);
+  --bg-deep:      #070e1e;
+  --bg-surface:   #0a152d;
+  --bg-card:      rgba(11, 23, 48, 0.88);
+  --bg-card-hover:rgba(16, 32, 64, 0.95);
   --bg-glass:     rgba(255, 255, 255, 0.04);
-  --border:       rgba(139, 92, 246, 0.2);
-  --border-glow:  rgba(139, 92, 246, 0.6);
+  --border:       rgba(59, 130, 246, 0.22);
+  --border-glow:  rgba(59, 130, 246, 0.55);
 
-  --purple:       #8b5cf6;
-  --purple-light: #a78bfa;
-  --cyan:         #22d3ee;
-  --pink:         #ec4899;
+  --blue-primary: #2563eb;
+  --blue-light:   #3b82f6;
+  --blue-glow:    #60a5fa;
+  --purple:       #6366f1;
+  --purple-light: #818cf8;
+  --cyan:         #38bdf8;
+  --pink:         #f43f5e;
   --green:        #10b981;
   --yellow:       #f59e0b;
   --red:          #ef4444;
 
-  --text-1: #f1f5f9;
+  --text-1: #f8fafc;
   --text-2: #94a3b8;
   --text-3: #64748b;
 
   --radius-sm: 8px;
   --radius-md: 12px;
-  --radius-lg: 20px;
-  --radius-xl: 28px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
 
-  --shadow-purple: 0 0 40px rgba(139, 92, 246, 0.15);
-  --shadow-cyan:   0 0 40px rgba(34, 211, 238, 0.15);
-  --shadow-glow:   0 0 80px rgba(139, 92, 246, 0.3);
+  --shadow-purple: 0 4px 24px rgba(37, 99, 235, 0.2);
+  --shadow-cyan:   0 4px 24px rgba(56, 189, 248, 0.2);
+  --shadow-glow:   0 0 50px rgba(37, 99, 235, 0.3);
 }
 
 /* ── Reset & Base ──────────────────────────────────────────── */
@@ -41,12 +46,13 @@
 html { scroll-behavior: smooth; }
 
 body {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg-deep);
   color: var(--text-1);
   min-height: 100vh;
   overflow-x: hidden;
-  line-height: 1.6;
+  line-height: 1.55;
+  letter-spacing: -0.01em;
 }
 
 /* prevent text selection only where explicitly needed */
@@ -64,25 +70,29 @@ input, textarea, pre, code, [contenteditable] {
 /* ── Scrollbar ─────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-deep); }
-::-webkit-scrollbar-thumb { background: var(--purple); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: var(--purple-light); }
+::-webkit-scrollbar-thumb { background: var(--blue-light); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--blue-glow); }
 
 /* ── Typography ────────────────────────────────────────────── */
-.font-display { font-family: 'Syne', sans-serif; }
+.font-display { font-family: 'Plus Jakarta Sans', sans-serif; letter-spacing: -0.025em; }
 .font-mono    { font-family: 'JetBrains Mono', monospace; }
 
-h1, h2, h3, h4 { font-family: 'Syne', sans-serif; line-height: 1.2; }
+h1, h2, h3, h4 {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
 
 /* ── Gradients ─────────────────────────────────────────────── */
 .gradient-text {
-  background: linear-gradient(135deg, var(--purple-light), var(--cyan), var(--pink));
+  background: linear-gradient(135deg, #60a5fa, #38bdf8, #818cf8);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 .gradient-text-2 {
-  background: linear-gradient(90deg, var(--cyan), var(--purple));
+  background: linear-gradient(90deg, #38bdf8, #3b82f6);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -194,7 +204,7 @@ h1, h2, h3, h4 { font-family: 'Syne', sans-serif; line-height: 1.2; }
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   color: var(--text-1);
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Plus Jakarta Sans', sans-serif;
   font-size: 14px;
   transition: all 0.25s ease;
   outline: none;
@@ -551,8 +561,9 @@ label {
 }
 
 .stat-number {
-  font-family: 'Syne', sans-serif;
-  font-size: 36px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: -0.03em;
+  font-size: 34px;
   font-weight: 800;
   line-height: 1;
   margin-bottom: 6px;

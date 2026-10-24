@@ -21,6 +21,8 @@ export interface MCQTest {
   endTime: any;
   assignedTo: string[];   // teacher UIDs
   assignedClasses: string[]; // class/group tags
+  assignedTeacher?: string;
+  assignedClass?: string;
   createdBy: string;
   createdAt: any;
   status: 'draft' | 'scheduled' | 'active' | 'ended';
@@ -189,7 +191,7 @@ const TestsPage: React.FC = () => {
                 { label: 'Completed', val: Object.keys(myResults).length, color: 'var(--yellow)' },
               ].map(s => (
                 <div key={s.label} className="glass-card" style={{ padding: '12px 20px', display: 'flex', gap: 12, alignItems: 'center' }}>
-                  <span style={{ fontSize: 22, fontWeight: 800, color: s.color, fontFamily: 'Syne,sans-serif' }}>{s.val}</span>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: s.color, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.val}</span>
                   <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{s.label}</span>
                 </div>
               ))}
@@ -467,7 +469,7 @@ const TestsPage: React.FC = () => {
                           </div>
 
                           <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: 16, fontWeight: 800, color: r.passed ? 'var(--green)' : 'var(--yellow)', fontFamily: 'Syne,sans-serif' }}>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: r.passed ? 'var(--green)' : 'var(--yellow)', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                               {r.score} / {r.totalMarks}
                             </div>
                             <div style={{ fontSize: 11, color: 'var(--text-3)' }}>

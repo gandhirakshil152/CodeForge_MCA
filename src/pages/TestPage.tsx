@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   doc, getDoc, collection, getDocs, addDoc, query,
-  where, serverTimestamp,
+  where, serverTimestamp, setDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -124,6 +124,51 @@ const TestPage: React.FC = () => {
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [showReviewPanel, setShowReviewPanel] = useState(false);
 
+  // Sync real-time progress to Firestore for Assigned Faculty & Admin Live Monitor
+  const syncLiveProgress = useCallback(async (
+    currentAnswers: Record<string, number> = answers,
+    currentCodes: Record<string, any> = codingCodes,
+    totalQs: number = questions.length,
+    statusOverride?: 'in_progress' | 'submitted',
+    finalScore?: number,
+    finalPercentage?: number,
+    finalPassed?: boolean
+  ) => {
+    if (!user || !testId) return;
+    try {
+      const isSub = statusOverride === 'submitted';
+      const mcqCount = Object.keys(currentAnswers).length;
+      const codingPassedCount = Object.keys(currentCodes).filter(k => (currentCodes[k]?.passed || 0) > 0).length;
+      const totalAttempted = mcqCount + codingPassedCount;
+
+      await setDoc(doc(db, 'test_live_progress', `${testId}_${user.uid}`), {
+        testId,
+        testTitle: test?.title || 'Placement Assessment',
+        testType: test?.type || 'mcq',
+        userId: user.uid,
+        userName: profile?.displayName || user.displayName || 'Student',
+        userEmail: user.email,
+        assignedFaculty: (test as any)?.assignedTeacher || '',
+        totalQuestions: totalQs,
+        answeredCount: totalAttempted,
+        currentQuestionIndex: currentIdx + 1,
+        status: statusOverride || (submitted ? 'submitted' : 'in_progress'),
+        warnings,
+        lastActive: serverTimestamp(),
+        startedAt: startTimeRef.current,
+        ...(isSub ? {
+          score: finalScore ?? 0,
+          percentage: finalPercentage ?? 0,
+          passed: finalPassed ?? false,
+          timeTaken: Math.round((Date.now() - startTimeRef.current) / 1000),
+          submittedAt: serverTimestamp(),
+        } : {}),
+      }, { merge: true });
+    } catch (err) {
+      console.warn('Live progress sync warning:', err);
+    }
+  }, [user, testId, answers, codingCodes, questions.length, currentIdx, submitted, warnings, test, profile]);
+
   const shuffle = <T,>(arr: T[]): T[] => [...arr].sort(() => Math.random() - 0.5);
 
   useEffect(() => {
@@ -232,6 +277,8 @@ const TestPage: React.FC = () => {
       }
       setTimeLeft(Math.max(60, secs));
       startTimeRef.current = Date.now();
+      // Inform faculty/admin live monitor that student has started
+      syncLiveProgress({}, initCodes, qs.length, 'in_progress');
     } catch (err) {
       console.error('Error loading test:', err);
       toast.error('Failed to load test questions. Please check connection.');
@@ -272,15 +319,17 @@ const TestPage: React.FC = () => {
     try {
       const res = await runJudge0Code(code, l, cases);
       setRunResults(p => ({ ...p, [qItem.id]: res }));
-      setCodingCodes(p => ({
-        ...p,
+      const updatedCodes = {
+        ...codingCodes,
         [qItem.id]: {
           code,
           lang: l,
           passed: res.passed,
           total: res.total,
         },
-      }));
+      };
+      setCodingCodes(updatedCodes);
+      syncLiveProgress(answers, updatedCodes, questions.length, 'in_progress');
       if (res.status === 'accepted') {
         toast.success(`✓ All ${res.total} test cases passed!`);
       } else {
@@ -424,6 +473,7 @@ const TestPage: React.FC = () => {
       };
 
       await addDoc(collection(db, 'test_results'), resultData);
+      await syncLiveProgress(answers, codingCodes, questions.length, 'submitted', score, percentage, percentage >= (test!.passingScore || 50));
       setResult(resultData);
       setSubmitted(true);
       toast.success(auto ? 'Test auto-submitted!' : 'Test submitted successfully! 🎉');
@@ -491,7 +541,7 @@ const TestPage: React.FC = () => {
                   { label: 'Status', val: passed ? 'PASSED' : 'NEEDS PRACTICE', color: passed ? 'var(--green)' : 'var(--yellow)' },
                 ].map((s, i) => (
                   <div key={i} className="glass-card" style={{ padding: '14px 10px', textAlign: 'center' }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: s.color, fontFamily: 'Syne,sans-serif' }}>{s.val}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: s.color, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.val}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>{s.label}</div>
                   </div>
                 ))}
@@ -803,7 +853,11 @@ const TestPage: React.FC = () => {
                     return (
                       <button
                         key={idx}
-                        onClick={() => setAnswers(prev => ({ ...prev, [q.id]: idx }))}
+                        onClick={() => {
+                          const newAns = { ...answers, [q.id]: idx };
+                          setAnswers(newAns);
+                          syncLiveProgress(newAns, codingCodes, questions.length, 'in_progress');
+                        }}
                         style={{
                           padding: '14px 18px', borderRadius: 12,
                           background: selected ? 'rgba(139,92,246,0.18)' : 'var(--bg-card)',
@@ -955,7 +1009,7 @@ const TestPage: React.FC = () => {
                   { label: 'Unattempted', val: questions.length - totalAnswered, color: 'var(--red)' },
                 ].map(s => (
                   <div key={s.label} className="glass-card" style={{ padding: 12, textAlign: 'center' }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: s.color, fontFamily: 'Syne,sans-serif' }}>{s.val}</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: s.color, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.val}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{s.label}</div>
                   </div>
                 ))}

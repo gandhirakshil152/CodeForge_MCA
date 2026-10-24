@@ -22,8 +22,8 @@ const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-deep)' }}>
       <div style={{ textAlign: 'center' }}>
-        <div style={{ width: 48, height: 48, border: '3px solid rgba(139,92,246,0.3)', borderTop: '3px solid var(--purple)', borderRadius: '50%', animation: 'spin-slow 0.8s linear infinite', margin: '0 auto 16px' }} />
-        <p style={{ color: 'var(--text-3)', fontFamily: 'Space Grotesk, sans-serif' }}>Loading...</p>
+        <div style={{ width: 44, height: 44, border: '3px solid rgba(59,130,246,0.2)', borderTop: '3px solid var(--blue-light)', borderRadius: '50%', animation: 'spin-slow 0.8s linear infinite', margin: '0 auto 16px' }} />
+        <p style={{ color: 'var(--text-3)', fontFamily: 'Plus Jakarta Sans, sans-serif', fontSize: 14 }}>Loading CodeForge MCA...</p>
       </div>
     </div>
   );
@@ -78,17 +78,18 @@ const App: React.FC = () => (
           className: 'toast',
           duration: 3000,
           style: {
-            background: '#0d0d22',
-            border: '1px solid rgba(139,92,246,0.3)',
-            color: '#f1f5f9',
-            fontFamily: 'Space Grotesk, sans-serif',
+            background: '#0a1628',
+            border: '1px solid rgba(59,130,246,0.3)',
+            color: '#f8fafc',
+            fontFamily: 'Plus Jakarta Sans, sans-serif',
             borderRadius: '12px',
+            fontSize: '13px',
           },
           success: {
-            iconTheme: { primary: '#10b981', secondary: '#0d0d22' },
+            iconTheme: { primary: '#10b981', secondary: '#0a1628' },
           },
           error: {
-            iconTheme: { primary: '#ef4444', secondary: '#0d0d22' },
+            iconTheme: { primary: '#ef4444', secondary: '#0a1628' },
           },
         }}
       />

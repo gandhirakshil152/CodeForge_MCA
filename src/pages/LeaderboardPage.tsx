@@ -629,7 +629,7 @@ const LeaderboardPage: React.FC = () => {
                                   </div>
                                 </td>
                                 <td style={{ padding: '12px 16px' }}>
-                                  <span style={{ fontWeight: 800, fontSize: 15, color: r.passed ? 'var(--green)' : 'var(--yellow)', fontFamily: 'Syne,sans-serif' }}>
+                                  <span style={{ fontWeight: 800, fontSize: 15, color: r.passed ? 'var(--green)' : 'var(--yellow)', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                                     {r.score}
                                   </span>
                                   <span style={{ fontSize: 11, color: 'var(--text-3)' }}> / {r.totalMarks}</span>

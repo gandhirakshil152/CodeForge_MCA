@@ -61,7 +61,7 @@ export class ErrorBoundary extends React.Component<
               fontWeight: 800,
               color: '#f1f5f9',
               marginBottom: 8,
-              fontFamily: 'Syne, sans-serif',
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
             }}
           >
             Something went wrong

@@ -12,7 +12,7 @@ import {
   Save, X, AlertTriangle, UserCheck, UserX, Loader2,
   Database, CheckCircle2, Activity, Award, Clock, Zap,
   Eye, EyeOff, Table2, ThumbsUp, ThumbsDown, Calendar, ListChecks,
-  ClipboardList,
+  ClipboardList, Code2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { Problem } from './ProblemsPage';
@@ -98,7 +98,7 @@ const DBMS_TOPICS = [
   'ER Diagrams', 'ACID Properties', 'Concurrency Control', 'Keys & Constraints',
 ];
 
-const DBMS_TYPES = ['query', 'theory', 'normalization', 'design'] as const;
+export const DBMS_TYPES = ['query', 'theory', 'normalization', 'design'] as const;
 
 const EMPTY_DBMS: Omit<DbmsQuestion, 'id'> = {
   title: '', topic: 'SQL Basics', difficulty: 'easy', type: 'query',
@@ -218,7 +218,23 @@ const AdminPage: React.FC = () => {
           score: increment(pts),
           problemsSolved: increment(1),
         });
-        toast.success(`Marked PASS — +${pts} pts awarded to ${sub.userName}`);
+
+        // Record in primary submissions collection so student dashboard, profile, and leaderboard recognize it
+        await addDoc(collection(db, 'submissions'), {
+          userId: sub.userId,
+          userName: sub.userName,
+          userEmail: sub.userEmail,
+          problemId: sub.questionId,
+          problemTitle: `[SQL] ${sub.questionTitle}`,
+          language: 'sql',
+          status: 'accepted',
+          runtime: 12,
+          score: pts,
+          todayDate: new Date().toISOString().slice(0, 10),
+          createdAt: serverTimestamp(),
+        });
+
+        toast.success(`Marked PASS — +${pts} pts awarded & submission registered for ${sub.userName}`);
       } else {
         toast.success(`Marked FAIL for ${sub.userName}`);
       }
@@ -418,17 +434,17 @@ const AdminPage: React.FC = () => {
   if (!isAdmin) return null;
 
   const TABS = [
-    { id: 'problems'    as AdminTab, label: 'Problems',        icon: <BookOpen size={14} />,   count: stats.totalProblems },
-    { id: 'dbms'        as AdminTab, label: 'DBMS',            icon: <Database size={14} />,   count: stats.totalDbms },
-    { id: 'tests'       as AdminTab, label: 'Placement Tests', icon: <ClipboardList size={14} />, count: testsCount },
-    { id: 'submissions' as AdminTab, label: 'Submissions',     icon: <Eye size={14} />,        count: stats.totalSubmissions + stats.totalDbmsSubmissions },
-    { id: 'users'       as AdminTab, label: 'Users',           icon: <Users size={14} />,      count: stats.totalUsers },
-    { id: 'daily_tasks' as AdminTab, label: 'Daily Tasks',     icon: <Calendar size={14} />,  count: dailyTasks.length },
-    { id: 'stats'       as AdminTab, label: 'Analytics',       icon: <BarChart2 size={14} /> },
+    { id: 'problems'    as AdminTab, label: '1. Coding Problems', icon: <Code2 size={14} />,   count: stats.totalProblems },
+    { id: 'dbms'        as AdminTab, label: '2. SQL & DBMS Lab',  icon: <Database size={14} />,count: stats.totalDbms },
+    { id: 'tests'       as AdminTab, label: 'Placement Tests',    icon: <ClipboardList size={14} />, count: testsCount },
+    { id: 'submissions' as AdminTab, label: 'Submissions',        icon: <Eye size={14} />,        count: stats.totalSubmissions + stats.totalDbmsSubmissions },
+    { id: 'users'       as AdminTab, label: 'Users',              icon: <Users size={14} />,      count: stats.totalUsers },
+    { id: 'daily_tasks' as AdminTab, label: 'Daily Tasks',        icon: <Calendar size={14} />,  count: dailyTasks.length },
+    { id: 'stats'       as AdminTab, label: 'Analytics',          icon: <BarChart2 size={14} /> },
   ];
 
   const tabAccent = (id: AdminTab) =>
-    id === 'dbms' ? 'var(--cyan)' : id === 'tests' ? 'var(--yellow)' : id === 'stats' ? 'var(--yellow)' : id === 'users' ? 'var(--pink)' : id === 'submissions' ? 'var(--green)' : id === 'daily_tasks' ? 'var(--cyan)' : 'var(--purple-light)';
+    id === 'dbms' ? 'var(--cyan)' : id === 'tests' ? 'var(--yellow)' : id === 'stats' ? 'var(--yellow)' : id === 'users' ? 'var(--pink)' : id === 'submissions' ? 'var(--green)' : id === 'daily_tasks' ? 'var(--cyan)' : 'var(--blue-light)';
 
   return (
     <>
@@ -440,9 +456,9 @@ const AdminPage: React.FC = () => {
           <div style={{
             position: 'fixed', bottom: 18, right: 22, zIndex: 9999, pointerEvents: 'none',
             opacity: 0.18, fontSize: 10, fontFamily: 'JetBrains Mono, monospace',
-            color: 'var(--purple-light)', letterSpacing: '0.12em', textTransform: 'uppercase', userSelect: 'none',
+            color: 'var(--blue-light)', letterSpacing: '0.12em', textTransform: 'uppercase', userSelect: 'none',
           }}>
-            ⚡ Created by Rakshil Gandhi
+            ⚡ CodeForge MCA
           </div>
 
           {/* ── Header ─────────────────────────────────────────── */}
@@ -450,36 +466,36 @@ const AdminPage: React.FC = () => {
             <div className="flex items-center gap-3" style={{ flexWrap: 'wrap' }}>
               <div style={{
                 width: 50, height: 50, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'linear-gradient(135deg,rgba(245,158,11,0.22),rgba(245,158,11,0.05))',
-                border: '1px solid rgba(245,158,11,0.42)', boxShadow: '0 0 28px rgba(245,158,11,0.18)',
+                background: 'linear-gradient(135deg,rgba(59,130,246,0.22),rgba(59,130,246,0.05))',
+                border: '1px solid rgba(59,130,246,0.42)', boxShadow: '0 0 28px rgba(59,130,246,0.18)',
               }}>
-                <Shield size={22} color="var(--yellow)" />
+                <Shield size={22} color="var(--blue-light)" />
               </div>
               <div>
                 <h1 className="font-display" style={{ fontSize: 'clamp(20px,3.5vw,30px)', fontWeight: 800, lineHeight: 1.15 }}>
                   Admin Panel{' '}
                   <span style={{
-                    fontSize: 11, color: 'var(--yellow)', background: 'rgba(245,158,11,0.1)',
-                    border: '1px solid rgba(245,158,11,0.32)', borderRadius: 99, padding: '2px 9px', verticalAlign: 'middle',
+                    fontSize: 11, color: 'var(--blue-light)', background: 'rgba(59,130,246,0.12)',
+                    border: '1px solid rgba(59,130,246,0.32)', borderRadius: 99, padding: '2px 9px', verticalAlign: 'middle',
                   }}>
                     {isSuperAdmin ? '👑 Super Admin' : '🛡️ Admin'}
                   </span>
                 </h1>
                 <p style={{ color: 'var(--text-3)', fontSize: 12, marginTop: 3 }}>
-                  Manage problems · DBMS bank · users · analytics
+                  College Assessment Hub · 2 Problem Tracks (Coding & SQL) · Live MCQ Tests · Analytics
                 </p>
               </div>
               <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
                 {tab === 'problems' && !showForm && (
                   <button className="btn btn-primary" onClick={() => { resetForm(); setShowForm(true); }}>
-                    <Plus size={14} /> Add Problem
+                    <Plus size={14} /> Add Coding Problem
                   </button>
                 )}
                 {tab === 'dbms' && !showDbmsForm && (
                   <button className="btn"
                     style={{ background: 'linear-gradient(135deg,var(--cyan),#0891b2)', color: '#000', boxShadow: '0 4px 18px rgba(34,211,238,0.32)', fontWeight: 700 }}
                     onClick={() => { resetDbmsForm(); setShowDbmsForm(true); }}>
-                    <Plus size={14} /> Add DBMS Q
+                    <Plus size={14} /> Add SQL Question
                   </button>
                 )}
                 <button className="btn btn-ghost btn-sm" onClick={loadData}><Zap size={12}/> Refresh</button>
@@ -490,15 +506,15 @@ const AdminPage: React.FC = () => {
           {/* ── Stats Row ───────────────────────────────────────── */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 10, marginBottom: 24 }}>
             {[
-              { label: 'Users',       value: stats.totalUsers,            color: 'var(--cyan)',         icon: <Users size={16} />,        bg: 'rgba(34,211,238,0.07)' },
-              { label: 'Problems',    value: stats.totalProblems,         color: 'var(--purple-light)', icon: <BookOpen size={16} />,     bg: 'rgba(139,92,246,0.07)' },
-              { label: 'DBMS Qs',     value: stats.totalDbms,             color: 'var(--cyan)',         icon: <Database size={16} />,     bg: 'rgba(34,211,238,0.05)' },
+              { label: 'Students',    value: stats.totalUsers,            color: 'var(--cyan)',         icon: <Users size={16} />,        bg: 'rgba(34,211,238,0.07)' },
+              { label: 'Coding Probs',value: stats.totalProblems,         color: 'var(--blue-light)',   icon: <Code2 size={16} />,        bg: 'rgba(59,130,246,0.07)' },
+              { label: 'SQL Probs',   value: stats.totalDbms,             color: 'var(--cyan)',         icon: <Database size={16} />,     bg: 'rgba(34,211,238,0.05)' },
               { label: 'Submissions', value: stats.totalSubmissions,      color: 'var(--yellow)',       icon: <Zap size={16} />,          bg: 'rgba(245,158,11,0.07)' },
               { label: 'Accepted',    value: stats.acceptedSubmissions,   color: 'var(--green)',        icon: <CheckCircle2 size={16} />, bg: 'rgba(16,185,129,0.07)' },
             ].map((s, i) => (
               <div key={i} className="glass-card" style={{ padding: '14px 12px', background: s.bg, border: `1px solid ${s.color}20` }}>
                 <div style={{ color: s.color, marginBottom: 5 }}>{s.icon}</div>
-                <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'Syne,sans-serif', color: s.color }}>{s.value}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'Plus Jakarta Sans, sans-serif', color: s.color }}>{s.value}</div>
                 <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{s.label}</div>
               </div>
             ))}
@@ -513,9 +529,9 @@ const AdminPage: React.FC = () => {
                 <button key={t.id}
                   onClick={() => { setTab(t.id); setShowForm(false); setShowDbmsForm(false); }}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 5, padding: '6px 15px',
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
                     borderRadius: 10, border: 'none', cursor: 'pointer',
-                    fontFamily: 'Space Grotesk,sans-serif', fontWeight: 600, fontSize: 12,
+                    fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: 12,
                     transition: 'all 0.22s ease',
                     background: active ? `linear-gradient(135deg,${accent}30,${accent}10)` : 'transparent',
                     color: active ? accent : 'var(--text-3)',
@@ -533,6 +549,47 @@ const AdminPage: React.FC = () => {
           {/* ══════════════ PROBLEMS TAB ══════════════ */}
           {tab === 'problems' && (
             <>
+              {/* Notice 2 Sections Banner */}
+              <div style={{
+                marginBottom: 20, padding: '16px 20px',
+                background: 'linear-gradient(135deg, rgba(37,99,235,0.08), rgba(56,189,248,0.03))',
+                border: '1px solid rgba(59,130,246,0.3)', borderRadius: 'var(--radius-md)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 4,
+                        background: 'rgba(59,130,246,0.2)', color: 'var(--blue-light)',
+                        textTransform: 'uppercase', letterSpacing: '0.05em',
+                      }}>
+                        Track 1 of 2
+                      </span>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>
+                        Section 1: Algorithmic Coding Problems ({problems.length} Available)
+                      </span>
+                    </div>
+                    <p style={{ color: 'var(--text-2)', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
+                      Students solve these in Java, C, Python, or JavaScript with automated Judge0 testcases. For Database queries, manage <strong style={{ color: 'var(--cyan)' }}>Section 2: SQL &amp; DBMS Lab</strong>.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      className="btn btn-sm btn-primary"
+                      onClick={() => { resetForm(); setShowForm(true); }}
+                    >
+                      <Plus size={13} /> Add Coding Problem
+                    </button>
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      style={{ color: 'var(--cyan)', border: '1px solid rgba(34,211,238,0.3)' }}
+                      onClick={() => { setTab('dbms'); resetDbmsForm(); }}
+                    >
+                      <Database size={13} /> Switch to SQL Section ({stats.totalDbms}) →
+                    </button>
+                  </div>
+                </div>
+              </div>
               {showForm && (
                 <div className="glass-card" style={{ padding: 26, marginBottom: 28, border: '1px solid rgba(139,92,246,0.28)' }}>
                   <div className="flex items-center justify-between" style={{ marginBottom: 20 }}>
@@ -694,16 +751,44 @@ const AdminPage: React.FC = () => {
             <>
               {!showDbmsForm && (
                 <div style={{
-                  marginBottom: 16, padding: '11px 16px',
-                  background: 'linear-gradient(135deg,rgba(34,211,238,0.08),rgba(34,211,238,0.02))',
-                  border: '1px solid rgba(34,211,238,0.22)', borderRadius: 'var(--radius-md)',
-                  display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                  marginBottom: 20, padding: '16px 20px',
+                  background: 'linear-gradient(135deg, rgba(34,211,238,0.08), rgba(6,182,212,0.02))',
+                  border: '1px solid rgba(34,211,238,0.28)', borderRadius: 'var(--radius-md)',
                 }}>
-                  <Database size={15} color="var(--cyan)" />
-                  <span style={{ fontWeight: 600, color: 'var(--cyan)', fontSize: 13 }}>DBMS Question Bank</span>
-                  <span style={{ color: 'var(--text-3)', fontSize: 12 }}>— SQL queries, theory, normalization & schema design</span>
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                    {DBMS_TYPES.map(t => <span key={t} className={`badge ${typeColor(t)}`}>{typeIcon(t)} {t}</span>)}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{
+                          fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 4,
+                          background: 'rgba(34,211,238,0.2)', color: 'var(--cyan)',
+                          textTransform: 'uppercase', letterSpacing: '0.05em',
+                        }}>
+                          Track 2 of 2
+                        </span>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>
+                          Section 2: SQL Queries &amp; DBMS Lab ({dbmsQuestions.length} Questions)
+                        </span>
+                      </div>
+                      <p style={{ color: 'var(--text-2)', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
+                        Manage SQL query tasks, normalization exercises, and schema evaluation for college labs.
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="btn btn-sm"
+                        style={{ background: 'linear-gradient(135deg,var(--cyan),#0891b2)', color: '#000', fontWeight: 700 }}
+                        onClick={() => { resetDbmsForm(); setShowDbmsForm(true); }}
+                      >
+                        <Plus size={13} /> Add SQL Question
+                      </button>
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        style={{ color: 'var(--blue-light)', border: '1px solid rgba(59,130,246,0.3)' }}
+                        onClick={() => { setTab('problems'); resetForm(); }}
+                      >
+                        <Code2 size={13} /> ← Switch to Coding Section ({stats.totalProblems})
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1166,7 +1251,7 @@ const AdminPage: React.FC = () => {
                 ].map((card, i) => (
                   <div key={i} className="glass-card" style={{ padding: 20, background: card.bg }}>
                     <div style={{ color: card.color, marginBottom: 9 }}>{card.icon}</div>
-                    <div style={{ fontSize: 32, fontWeight: 800, fontFamily: 'Syne,sans-serif', color: card.color, lineHeight: 1 }}>{card.value}</div>
+                    <div style={{ fontSize: 32, fontWeight: 800, fontFamily: 'Plus Jakarta Sans, sans-serif', color: card.color, lineHeight: 1 }}>{card.value}</div>
                     <div style={{ fontWeight: 600, fontSize: 13, marginTop: 6 }}>{card.label}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{card.sub}</div>
                   </div>
@@ -1242,7 +1327,7 @@ const AdminPage: React.FC = () => {
                     const count = users.filter(u => u.role === r.role).length;
                     return (
                       <div key={r.role} style={{ flex: '1 1 130px', padding: '13px 16px', background: r.bg, borderRadius: 'var(--radius-md)', border: `1px solid ${r.color}25` }}>
-                        <div style={{ fontSize: 24, fontWeight: 800, color: r.color, fontFamily: 'Syne,sans-serif' }}>{count}</div>
+                        <div style={{ fontSize: 24, fontWeight: 800, color: r.color, fontFamily: 'Plus Jakarta Sans, sans-serif' }}>{count}</div>
                         <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>{r.label}</div>
                         <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>{stats.totalUsers > 0 ? Math.round(count / stats.totalUsers * 100) : 0}% of users</div>
                       </div>
@@ -1368,8 +1453,8 @@ const AdminPage: React.FC = () => {
             fontSize: 11, color: 'rgba(139,92,246,0.3)',
             fontFamily: 'JetBrains Mono,monospace', letterSpacing: '0.1em',
           }}>
-            ⚡ CodeForge MCA — crafted with 💜 by{' '}
-            <strong style={{ color: 'rgba(167,139,250,0.5)' }}>Rakshil Gandhi</strong>
+            ⚡ CodeForge MCA — Engineered for Department Assessments by{' '}
+            <strong style={{ color: 'rgba(167,139,250,0.7)' }}>Rakshil Gandhi</strong>
           </div>
 
         </div>

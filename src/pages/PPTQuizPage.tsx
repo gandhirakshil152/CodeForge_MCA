@@ -485,7 +485,7 @@ const PPTQuizPage: React.FC = () => {
               <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
                 {/* Score hero */}
                 <div className="glass-card" style={{ padding:'32px 24px', textAlign:'center', border:`1px solid ${g.color}30`, background:`linear-gradient(135deg,${g.color}10,${g.color}03)` }}>
-                  <div style={{ fontSize:72, fontWeight:800, fontFamily:'Syne,sans-serif', color:g.color, lineHeight:1 }}>{g.grade}</div>
+                  <div style={{ fontSize:72, fontWeight:800, fontFamily:"'Plus Jakarta Sans', sans-serif", color:g.color, lineHeight:1 }}>{g.grade}</div>
                   <div style={{ fontSize:18, fontWeight:700, marginTop:8, marginBottom:4 }}>{g.label}</div>
                   <div style={{ color:'var(--text-3)', fontSize:13 }}>
                     {score}/{questions.length} correct · {pct}% score

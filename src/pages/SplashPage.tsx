@@ -51,8 +51,8 @@ const features = [
 const stats = [
   { num: '500+', label: 'Problems' },
   { num: '4', label: 'Languages' },
-  { num: '∞', label: 'Practice' },
-  { num: '🔥', label: 'Vibes' },
+  { num: 'SQL', label: 'DBMS Lab' },
+  { num: '100%', label: 'Placement Prep' },
 ];
 
 const SplashPage: React.FC = () => {
@@ -88,9 +88,8 @@ const SplashPage: React.FC = () => {
           </h1>
 
           <p className="animate-fade-up" style={{ fontSize: 'clamp(16px, 2.5vw, 22px)', color: 'var(--text-2)', maxWidth: 600, margin: '0 auto 40px', lineHeight: 1.7, animationDelay: '0.1s' }}>
-            The ultimate coding arena for <strong style={{ color: 'var(--purple-light)' }}>MCA students</strong>. 
-            Practice HackerRank-style problems, climb the leaderboard, and ace your placements. 
-            <span style={{ color: 'var(--cyan)' }}> No cap. fr fr. 🚀</span>
+            The comprehensive coding and assessment portal for <strong style={{ color: 'var(--purple-light)' }}>MCA students</strong>. 
+            Practice industry-level algorithmic problems, execute SQL lab queries, and succeed in technical campus placements.
           </p>
 
           {/* CTA Buttons */}
@@ -141,10 +140,10 @@ const SplashPage: React.FC = () => {
         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent, rgba(139,92,246,0.03), transparent)' }} />
         <div className="container">
           <div style={{ textAlign: 'center', marginBottom: 64 }}>
-            <div className="badge badge-cyan" style={{ marginBottom: 16 }}>Features</div>
-            <h2 className="font-display gradient-text" style={{ fontSize: 'clamp(32px, 5vw, 56px)', fontWeight: 800 }}>Built Different. 💅</h2>
+            <div className="badge badge-cyan" style={{ marginBottom: 16 }}>Platform Features</div>
+            <h2 className="font-display gradient-text" style={{ fontSize: 'clamp(32px, 5vw, 56px)', fontWeight: 800 }}>Academic Excellence</h2>
             <p style={{ color: 'var(--text-2)', fontSize: 18, marginTop: 16, maxWidth: 500, margin: '16px auto 0' }}>
-              Everything you need to go from zero to placement hero.
+              Engineered for syllabus mastery, rigorous evaluation, and placement success.
             </p>
           </div>
 
@@ -165,17 +164,17 @@ const SplashPage: React.FC = () => {
       {/* ── CTA Banner ─── */}
       <section style={{ padding: '80px 0' }}>
         <div className="container">
-          <div style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(34,211,238,0.1))', border: '1px solid var(--border-glow)', borderRadius: 'var(--radius-xl)', padding: 'clamp(40px, 6vw, 80px)', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ background: 'linear-gradient(135deg, rgba(14,165,233,0.15), rgba(30,58,138,0.25))', border: '1px solid var(--border-glow)', borderRadius: 'var(--radius-xl)', padding: 'clamp(40px, 6vw, 80px)', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
             <div className="orb orb-purple" style={{ width: 300, height: 300, top: -100, right: -100, opacity: 0.3 }} />
             <h2 className="font-display" style={{ fontSize: 'clamp(28px, 4vw, 48px)', fontWeight: 800, marginBottom: 16 }}>
-              Ready to <span className="gradient-text">level up</span>? 🔥
+              Ready to <span className="gradient-text">accelerate your career</span>?
             </h2>
             <p style={{ color: 'var(--text-2)', fontSize: 18, marginBottom: 32 }}>
-              Join your MCA batchmates and start grinding. Your dream placement is one commit away.
+              Join your MCA peers, complete proctored evaluations, and showcase your verified skills.
             </p>
             {!user && (
               <Link to="/register" className="btn btn-primary btn-lg" style={{ fontSize: 16 }}>
-                <Zap size={18} /> Create Account — It's Free
+                <Zap size={18} /> Create Student Account — Free
               </Link>
             )}
           </div>
@@ -185,7 +184,7 @@ const SplashPage: React.FC = () => {
       {/* Footer */}
       <footer style={{ borderTop: '1px solid var(--border)', padding: '32px 24px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
         <div className="font-display gradient-text" style={{ fontSize: 24, fontWeight: 800, marginBottom: 8 }}>CodeForge MCA</div>
-        <p>Built with 💜 for MCA students • Placement prep made fun</p>
+        <p>MCA Assessment &amp; Placement Preparation Platform • Department of Computer Applications</p>
       </footer>
     </div>
   );

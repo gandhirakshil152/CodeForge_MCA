@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   collection, getDocs, query, orderBy, addDoc, serverTimestamp,
+  doc, updateDoc, increment,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
@@ -32,6 +33,17 @@ const typeColor = (t: string) =>
 
 const TOPICS = ["All","SQL Basics","Joins","Subqueries","Aggregation","Normalization",
   "Indexing","Transactions","Stored Procedures","Views","ER Diagrams","Keys & Constraints","Other"];
+
+// Helper to normalize SQL for comparison (strip comments, whitespace, trailing semicolons, lowercase)
+const normalizeSql = (sql: string): string => {
+  return sql
+    .replace(/--.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/;/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+};
 
 const DBMSPage: React.FC = () => {
   const { user, profile } = useAuth();
@@ -92,21 +104,72 @@ const DBMSPage: React.FC = () => {
     if (!sql.trim()) { toast.error("Please type your SQL query first!"); return; }
     setIsSubmitting(true);
     try {
+      const todayDate = new Date().toISOString().slice(0, 10);
+      const earnedPts = POINTS[q.difficulty] || 10;
+      
+      // Auto-verify if expectedQuery matches
+      const isExpectedMatch = Boolean(
+        q.expectedQuery && 
+        normalizeSql(sql) === normalizeSql(q.expectedQuery)
+      );
+
+      const status = isExpectedMatch ? "pass" : "pending";
+      const pts = isExpectedMatch ? earnedPts : 0;
+
+      // 1. Record in dbms_submissions
       await addDoc(collection(db, "dbms_submissions"), {
         userId: user.uid,
-        userName: profile.displayName,
+        userName: profile.displayName || user.displayName || "Student",
         userEmail: user.email,
         questionId: q.id,
         questionTitle: q.title,
         topic: q.topic,
         difficulty: q.difficulty,
         userQuery: sql,
-        status: "pending",
-        points: 0,
+        status,
+        points: pts,
+        todayDate,
+        createdAt: serverTimestamp(),
         submittedAt: serverTimestamp(),
       });
-      setPending(prev => new Set([...prev, q.id]));
-      toast.success("Query submitted! Admin will grade it soon.");
+
+      // 2. Also record in main submissions collection so it appears in student submission counts & history
+      await addDoc(collection(db, "submissions"), {
+        userId: user.uid,
+        userName: profile.displayName || user.displayName || "Student",
+        userEmail: user.email,
+        problemId: q.id,
+        problemTitle: `[SQL] ${q.title}`,
+        language: "sql",
+        status: isExpectedMatch ? "accepted" : "pending",
+        runtime: 14,
+        score: pts,
+        todayDate,
+        createdAt: serverTimestamp(),
+      });
+
+      // 3. Update user profile stats
+      const userUpdate: Record<string, any> = {
+        totalSubmissions: increment(1),
+      };
+      if (isExpectedMatch && !solved.has(q.id)) {
+        userUpdate.problemsSolved = increment(1);
+        userUpdate.score = increment(pts);
+      }
+      await updateDoc(doc(db, "users", user.uid), userUpdate);
+
+      if (isExpectedMatch) {
+        setSolved(prev => new Set([...prev, q.id]));
+        setPending(prev => {
+          const next = new Set(prev);
+          next.delete(q.id);
+          return next;
+        });
+        toast.success(`Query Verified & Accepted! +${pts} pts awarded 🎉`);
+      } else {
+        setPending(prev => new Set([...prev, q.id]));
+        toast.success("Query submitted! Counted in your submissions & sent for review.");
+      }
     } catch (err) {
       toast.error("Submission failed!");
       console.error(err);
@@ -164,7 +227,7 @@ const DBMSPage: React.FC = () => {
                   { label: "Hard", value: questions.filter(q=>q.difficulty==="hard").length, color: "var(--red)" },
                 ].map((s, i) => (
                   <div key={i} className="glass-card" style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 2 }}>
-                    <span style={{ fontSize: 18, fontWeight: 800, color: s.color, fontFamily: "Syne,sans-serif" }}>{s.value}</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: s.color, fontFamily: "Plus Jakarta Sans, sans-serif" }}>{s.value}</span>
                     <span style={{ fontSize: 10, color: "var(--text-3)" }}>{s.label}</span>
                   </div>
                 ))}
@@ -227,7 +290,7 @@ const DBMSPage: React.FC = () => {
                     <button onClick={() => toggle(q.id, setExpanded)} style={{ width: "100%", background: "none", border: "none", padding: "16px 20px", cursor: "pointer", textAlign: "left" }}>
                       <div className="flex items-center justify-between gap-3" style={{ flexWrap: "wrap" }}>
                         <div className="flex items-center gap-3 flex-1" style={{ minWidth: 0 }}>
-                          <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(34,211,238,0.1)", border: "1px solid rgba(34,211,238,0.2)", fontWeight: 800, fontSize: 11, color: "var(--cyan)", fontFamily: "Syne,sans-serif" }}>
+                          <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(34,211,238,0.1)", border: "1px solid rgba(34,211,238,0.2)", fontWeight: 800, fontSize: 11, color: "var(--cyan)", fontFamily: "Plus Jakarta Sans, sans-serif" }}>
                             {q.type === "query" ? "SQL" : q.type === "theory" ? "TH" : q.type === "normalization" ? "NF" : "SD"}
                           </div>
                           <div style={{ minWidth: 0 }}>
