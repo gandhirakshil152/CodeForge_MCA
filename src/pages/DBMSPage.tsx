@@ -14,7 +14,7 @@ import {
   MessageSquare, Terminal, Loader2,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { executeSqlInDb, type TableDef, type SqlQueryResult } from "../utils/sqlRunner";
+import { executeSqlInDb, parseColumns, parseRows, parseRowCells, type TableDef, type SqlQueryResult } from "../utils/sqlRunner";
 
 interface DbmsQuestion {
   id: string;
@@ -547,31 +547,35 @@ const DBMSPage: React.FC = () => {
                                 <Table2 size={13} color="var(--cyan)" />
                                 <span style={{ fontWeight: 700, fontSize: 13, color: "var(--cyan)" }}>Sample Data Tables</span>
                               </div>
-                              {q.tableData.filter(t => t.name).map((t, ti) => (
-                                <div key={ti} style={{ marginBottom: 12 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-2)", marginBottom: 6, fontFamily: "JetBrains Mono,monospace" }}>Table: {t.name}</div>
-                                  <div style={{ overflowX: "auto" }}>
-                                    <table style={{ width: "auto", minWidth: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: "JetBrains Mono,monospace" }}>
-                                      <thead>
-                                        <tr style={{ background: "rgba(34,211,238,0.08)" }}>
-                                          {t.columns.split(",").map((col, ci) => (
-                                            <th key={ci} style={{ padding: "6px 14px", textAlign: "left", color: "var(--cyan)", fontSize: 11, borderBottom: "1px solid rgba(34,211,238,0.2)" }}>{col.trim()}</th>
-                                          ))}
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {t.rows.split("\n").filter(Boolean).map((row, ri) => (
-                                          <tr key={ri} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                                            {row.split(",").map((cell, ci) => (
-                                              <td key={ci} style={{ padding: "5px 14px", color: "var(--text-2)" }}>{cell.trim()}</td>
+                              {q.tableData.filter(t => t.name).map((t, ti) => {
+                                const cols = parseColumns(t.columns);
+                                const rows = parseRows(t.rows);
+                                return (
+                                  <div key={ti} style={{ marginBottom: 12 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-2)", marginBottom: 6, fontFamily: "JetBrains Mono,monospace" }}>Table: {t.name}</div>
+                                    <div style={{ overflowX: "auto" }}>
+                                      <table style={{ width: "auto", minWidth: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: "JetBrains Mono,monospace" }}>
+                                        <thead>
+                                          <tr style={{ background: "rgba(34,211,238,0.08)" }}>
+                                            {cols.map((col, ci) => (
+                                              <th key={ci} style={{ padding: "6px 14px", textAlign: "left", color: "var(--cyan)", fontSize: 11, borderBottom: "1px solid rgba(34,211,238,0.2)" }}>{col}</th>
                                             ))}
                                           </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
+                                        </thead>
+                                        <tbody>
+                                          {rows.map((row, ri) => (
+                                            <tr key={ri} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                                              {parseRowCells(row).map((cell, ci) => (
+                                                <td key={ci} style={{ padding: "5px 14px", color: "var(--text-2)" }}>{cell}</td>
+                                              ))}
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
 

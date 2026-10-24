@@ -17,7 +17,7 @@ import {
 import toast from 'react-hot-toast';
 import type { Problem } from './ProblemsPage';
 import { AdminTestsTab } from '../components/AdminTestsTab';
-import { executeSqlInDb, type SqlQueryResult } from '../utils/sqlRunner';
+import { executeSqlInDb, parseColumns, parseRows, parseRowCells, type SqlQueryResult } from '../utils/sqlRunner';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AdminTab = 'problems' | 'dbms' | 'tests' | 'users' | 'stats' | 'submissions' | 'daily_tasks';
@@ -996,18 +996,18 @@ const AdminPage: React.FC = () => {
                               <table style={{ fontSize: 11, fontFamily: 'JetBrains Mono,monospace', borderCollapse: 'collapse', minWidth: '100%' }}>
                                 <thead>
                                   <tr>
-                                    {tbl.columns.split(',').map((col, ci) => (
+                                    {parseColumns(tbl.columns).map((col, ci) => (
                                       <th key={ci} style={{ background: 'rgba(34,211,238,0.14)', padding: '4px 10px', borderBottom: '1px solid rgba(34,211,238,0.2)', textAlign: 'left', color: 'var(--cyan)', whiteSpace: 'nowrap', fontSize: 11 }}>
-                                        {col.trim()}
+                                        {col}
                                       </th>
                                     ))}
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {tbl.rows.split('\n').filter(r => r.trim()).map((row, ri) => (
+                                  {parseRows(tbl.rows).map((row, ri) => (
                                     <tr key={ri} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                                      {row.split(',').map((cell, ci) => (
-                                        <td key={ci} style={{ padding: '3px 10px', color: 'var(--text-2)', fontSize: 11 }}>{cell.trim()}</td>
+                                      {parseRowCells(row).map((cell, ci) => (
+                                        <td key={ci} style={{ padding: '3px 10px', color: 'var(--text-2)', fontSize: 11 }}>{cell}</td>
                                       ))}
                                     </tr>
                                   ))}
