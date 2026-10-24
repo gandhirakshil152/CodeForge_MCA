@@ -91,7 +91,7 @@ const AuthPage: React.FC<{ mode: "login" | "register" }> = ({ mode }) => {
       ))}
       <div style={{width:"100%",maxWidth:440,position:"relative",zIndex:1}}>
         <div style={{textAlign:"center",marginBottom:36}}>
-          <Link to="/" style={{textDecoration:"none",display:"inline-flex",flexDirection:"column",alignItems:"center",gap:8}}>
+          <Link to="/dashboard" style={{textDecoration:"none",display:"inline-flex",flexDirection:"column",alignItems:"center",gap:8}}>
             <div className="navbar-logo" style={{width:64,height:64,fontSize:26,borderRadius:18,animation:"logo-bounce 2.5s ease-in-out infinite",boxShadow:"0 0 40px rgba(56,189,248,0.3)"}}>{"</>"}</div>
             <span className="font-display gradient-text" style={{fontSize:30,fontWeight:800}}>CodeForge MCA</span>
           </Link>

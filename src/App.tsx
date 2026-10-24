@@ -48,7 +48,8 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
 const AppRoutes: React.FC = () => (
   <Routes>
-    <Route path="/" element={<SplashPage />} />
+    <Route path="/" element={<Navigate to="/dashboard" replace />} />
+    <Route path="/splash" element={<SplashPage />} />
     <Route path="/login" element={<PublicRoute><AuthPage mode="login" /></PublicRoute>} />
     <Route path="/register" element={<PublicRoute><AuthPage mode="register" /></PublicRoute>} />
     <Route path="/problems" element={<ProblemsPage />} />
@@ -64,7 +65,7 @@ const AppRoutes: React.FC = () => (
     {/* Admin panel */}
     <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
     <Route path="/admin-panel" element={<AdminRoute><AdminPage /></AdminRoute>} />
-    <Route path="*" element={<Navigate to="/" replace />} />
+    <Route path="*" element={<Navigate to="/dashboard" replace />} />
   </Routes>
 );
 

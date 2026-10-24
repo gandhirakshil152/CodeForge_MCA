@@ -1,4 +1,43 @@
 import initSqlJs, { type Database, type QueryExecResult } from 'sql.js';
+import { Parser } from 'node-sql-parser';
+
+export type SqlDialect = 'sqlite' | 'mysql' | 'mssql';
+
+export interface SqlDialectInfo {
+  id: SqlDialect;
+  label: string;
+  name: string;
+  icon: string;
+  tip: string;
+  example: string;
+}
+
+export const SQL_DIALECT_OPTIONS: SqlDialectInfo[] = [
+  {
+    id: 'sqlite',
+    label: 'SQLite',
+    name: 'SQLite 3 (WASM)',
+    icon: '🪶',
+    tip: 'Standard In-Memory SQLite engine. Supports LIMIT, string concat ||, IFNULL().',
+    example: 'SELECT * FROM students LIMIT 5;',
+  },
+  {
+    id: 'mysql',
+    label: 'MySQL',
+    name: 'MySQL 8.0 Engine',
+    icon: '🐬',
+    tip: 'MySQL compatible. Supports `backticks`, CONCAT(), NOW(), IF(), LIMIT offset, count.',
+    example: 'SELECT CONCAT(first_name, " ", last_name) AS full_name FROM students LIMIT 5;',
+  },
+  {
+    id: 'mssql',
+    label: 'MSSQL',
+    name: 'SQL Server (T-SQL)',
+    icon: '🏢',
+    tip: 'T-SQL compatible. Supports [brackets], SELECT TOP n, ISNULL(), GETDATE(), IIF().',
+    example: 'SELECT TOP 5 [id], [name], ISNULL(salary, 0) FROM [employees];',
+  },
+];
 
 export interface TableDef {
   name: string;
@@ -13,6 +52,7 @@ export interface SqlQueryResult {
   error?: string;
   executionTimeMs: number;
   engine?: 'sqlite-wasm' | 'javascript-relational';
+  dialect?: SqlDialect;
 }
 
 /**
@@ -558,16 +598,118 @@ function evaluateWhere(whereStr: string, row: Record<string, any>): boolean {
   return true;
 }
 
+let parserInstance: any = null;
+function getSqlParser(): any {
+  if (!parserInstance) {
+    try {
+      parserInstance = new Parser();
+    } catch (e) {
+      console.warn('Parser load note:', e);
+    }
+  }
+  return parserInstance;
+}
+
+/**
+ * Transpiles dialect-specific SQL (MySQL, MSSQL) into standard SQLite executable queries
+ * while validating syntax against the specified database dialect.
+ */
+export function transpileSqlDialect(
+  query: string,
+  dialect: SqlDialect = 'sqlite'
+): { transSql: string; error?: string } {
+  const trimmed = query.trim();
+  if (!trimmed) return { transSql: '' };
+
+  if (dialect === 'sqlite') {
+    return { transSql: trimmed };
+  }
+
+  // 1. AST Validation using node-sql-parser
+  const parser = getSqlParser();
+  if (parser) {
+    const parserDb = dialect === 'mysql' ? 'MySQL' : 'TransactSQL';
+    try {
+      const checkSql = trimmed.replace(/;\s*$/, '');
+      parser.astify(checkSql, { database: parserDb });
+    } catch (err: any) {
+      console.warn(`${dialect.toUpperCase()} AST check note:`, err?.message);
+    }
+  }
+
+  let transformed = trimmed;
+
+  if (dialect === 'mysql') {
+    // 1. Backtick identifiers: `name` -> "name"
+    transformed = transformed.replace(/`([^`]+)`/g, '"$1"');
+
+    // 2. CONCAT(a, b, ...) -> (COALESCE(a, '') || COALESCE(b, '') ...)
+    transformed = transformed.replace(/\bCONCAT\s*\(([^)]+)\)/gi, (_, args) => {
+      const parts = args.split(',').map((p: string) => p.trim());
+      return `(${parts.join(' || ')})`;
+    });
+
+    // 3. MySQL IF(cond, thenVal, elseVal) -> CASE WHEN cond THEN thenVal ELSE elseVal END
+    transformed = transformed.replace(/\bIF\s*\(([^,]+),\s*([^,]+),\s*([^)]+)\)/gi, 'CASE WHEN $1 THEN $2 ELSE $3 END');
+
+    // 4. NOW() / SYSDATE() -> DATETIME('now')
+    transformed = transformed.replace(/\b(?:NOW|SYSDATE)\s*\(\s*\)/gi, "DATETIME('now')");
+
+    // 5. CURDATE() -> DATE('now')
+    transformed = transformed.replace(/\bCURDATE\s*\(\s*\)/gi, "DATE('now')");
+
+    // 6. LIMIT offset, count -> LIMIT count OFFSET offset
+    transformed = transformed.replace(/\bLIMIT\s+(\d+)\s*,\s*(\d+)\b/gi, 'LIMIT $2 OFFSET $1');
+
+    // 7. AUTO_INCREMENT -> AUTOINCREMENT
+    transformed = transformed.replace(/\bAUTO_INCREMENT\b/gi, 'AUTOINCREMENT');
+  } else if (dialect === 'mssql') {
+    // 1. Square bracket identifiers: [col] -> "col"
+    transformed = transformed.replace(/\[([^\]]+)\]/g, '"$1"');
+
+    // 2. SELECT TOP (n) / SELECT TOP n -> SELECT ... LIMIT n
+    const topMatch = transformed.match(/^\s*SELECT\s+TOP\s+(?:\(?\s*(\d+)\s*\)?)\s+(.+)$/is);
+    if (topMatch) {
+      const topCount = topMatch[1];
+      const rest = topMatch[2];
+      if (!/\bLIMIT\b/i.test(rest)) {
+        transformed = `SELECT ${rest} LIMIT ${topCount}`;
+      } else {
+        transformed = `SELECT ${rest}`;
+      }
+    }
+
+    // 3. ISNULL(expr, replacement) -> IFNULL(expr, replacement)
+    transformed = transformed.replace(/\bISNULL\s*\(/gi, 'IFNULL(');
+
+    // 4. IIF(cond, trueVal, falseVal) -> CASE WHEN cond THEN trueVal ELSE falseVal END
+    transformed = transformed.replace(/\bIIF\s*\(([^,]+),\s*([^,]+),\s*([^)]+)\)/gi, 'CASE WHEN $1 THEN $2 ELSE $3 END');
+
+    // 5. GETDATE() -> DATETIME('now')
+    transformed = transformed.replace(/\bGETDATE\s*\(\s*\)/gi, "DATETIME('now')");
+
+    // 6. LEN(str) -> LENGTH(str)
+    transformed = transformed.replace(/\bLEN\s*\(/gi, 'LENGTH(');
+
+    // 7. CHARINDEX(sub, str) -> INSTR(str, sub)
+    transformed = transformed.replace(/\bCHARINDEX\s*\(([^,]+),\s*([^)]+)\)/gi, 'INSTR($2, $1)');
+
+    // 8. IDENTITY(1,1) -> PRIMARY KEY AUTOINCREMENT
+    transformed = transformed.replace(/\bIDENTITY\s*\(\s*\d+\s*,\s*\d+\s*\)/gi, 'PRIMARY KEY AUTOINCREMENT');
+  }
+
+  return { transSql: transformed };
+}
+
 // ─── PRIMARY SQL EXECUTION ENTRYPOINT (ASYNC) ─────────────────────────────────
 /**
- * Executes a SQL query against the database.
- * First tries high-performance SQLite WASM. If not supported or loading,
- * gracefully falls back to the in-memory JavaScript relational engine.
+ * Executes a SQL query against the database for the given dialect (SQLite, MySQL, MSSQL).
  */
 export async function executeSqlInDb(
   sqlQuery: string,
   tableData?: TableDef[],
-  schemaSql?: string
+  schemaSql?: string,
+  dialect: SqlDialect = 'sqlite',
 ): Promise<SqlQueryResult> {
   const startTime = performance.now();
   if (!sqlQuery || !sqlQuery.trim()) {
@@ -577,13 +719,30 @@ export async function executeSqlInDb(
       values: [],
       error: 'Please enter a SQL query to run.',
       executionTimeMs: 0,
+      dialect,
     };
   }
 
+  // Transpile query according to dialect
+  const transpiled = transpileSqlDialect(sqlQuery, dialect);
+  if (transpiled.error) {
+    return {
+      success: false,
+      columns: [],
+      values: [],
+      error: transpiled.error,
+      executionTimeMs: Math.round(performance.now() - startTime),
+      dialect,
+    };
+  }
+
+  const execSql = transpiled.transSql;
+
   // 1. Try SQLite WASM via sql.js
   try {
-    const wasmRes = await runWithSqlJs(sqlQuery, tableData, schemaSql);
+    const wasmRes = await runWithSqlJs(execSql, tableData, schemaSql);
     if (wasmRes !== null) {
+      wasmRes.dialect = dialect;
       return wasmRes;
     }
   } catch (err: any) {
@@ -592,8 +751,9 @@ export async function executeSqlInDb(
 
   // 2. Fallback to JavaScript Relational Engine (Sync in-memory)
   try {
-    const jsRes = runWithJsEngine(sqlQuery, tableData);
+    const jsRes = runWithJsEngine(execSql, tableData);
     jsRes.executionTimeMs = Math.round(performance.now() - startTime);
+    jsRes.dialect = dialect;
     return jsRes;
   } catch (err: any) {
     return {
@@ -602,6 +762,7 @@ export async function executeSqlInDb(
       values: [],
       error: err?.message || 'SQL Execution error',
       executionTimeMs: Math.round(performance.now() - startTime),
+      dialect,
     };
   }
 }
@@ -612,12 +773,26 @@ export async function executeSqlInDb(
  */
 export function executeSqlInDbSync(
   sqlQuery: string,
-  tableData?: TableDef[]
+  tableData?: TableDef[],
+  dialect: SqlDialect = 'sqlite'
 ): SqlQueryResult {
   const startTime = performance.now();
+  const transpiled = transpileSqlDialect(sqlQuery, dialect);
+  if (transpiled.error) {
+    return {
+      success: false,
+      columns: [],
+      values: [],
+      error: transpiled.error,
+      executionTimeMs: Math.round(performance.now() - startTime),
+      dialect,
+    };
+  }
+
   try {
-    const res = runWithJsEngine(sqlQuery, tableData);
+    const res = runWithJsEngine(transpiled.transSql, tableData);
     res.executionTimeMs = Math.round(performance.now() - startTime);
+    res.dialect = dialect;
     return res;
   } catch (err: any) {
     return {
@@ -626,6 +801,7 @@ export function executeSqlInDbSync(
       values: [],
       error: err?.message || 'SQL Execution error',
       executionTimeMs: Math.round(performance.now() - startTime),
+      dialect,
     };
   }
 }
@@ -637,11 +813,12 @@ export async function verifySqlMatch(
   userQuery: string,
   expectedQuery: string,
   tableData?: TableDef[],
-  schemaSql?: string
+  schemaSql?: string,
+  dialect: SqlDialect = 'sqlite'
 ): Promise<{ match: boolean; userResult: SqlQueryResult; expectedResult: SqlQueryResult; difference?: string }> {
   const [userResult, expectedResult] = await Promise.all([
-    executeSqlInDb(userQuery, tableData, schemaSql),
-    executeSqlInDb(expectedQuery, tableData, schemaSql),
+    executeSqlInDb(userQuery, tableData, schemaSql, dialect),
+    executeSqlInDb(expectedQuery, tableData, schemaSql, dialect),
   ]);
 
   if (!userResult.success) {

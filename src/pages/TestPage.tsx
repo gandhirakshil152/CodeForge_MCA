@@ -9,12 +9,12 @@ import { useAuth } from '../contexts/AuthContext';
 import Editor from '@monaco-editor/react';
 import {
   ChevronLeft, ChevronRight, AlertCircle, Send, Flag, Eye, EyeOff,
-  Play, Code2, CheckCircle2, XCircle, Terminal, Clock, Trophy,
+  Play, Code2, CheckCircle2, XCircle, Terminal, Clock, Trophy, ShieldAlert,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Navbar from '../components/Navbar';
 import {
-  type LangId, LANG_OPTIONS, MONACO_LANG, type RunResult, runJudge0Code,
+  type LangId, LANG_OPTIONS, MONACO_LANG, type RunResult, runJudge0Code, validateCodeRestrictions,
 } from '../utils/judgeRunner';
 
 interface QuestionItem {
@@ -317,6 +317,14 @@ const TestPage: React.FC = () => {
 
     setRunningCode(true);
     try {
+      const policyCheck = validateCodeRestrictions(code, l);
+      if (!policyCheck.valid) {
+        toast.error(policyCheck.error || 'Evaluation Policy Violation', { duration: 5000 });
+        const res = await runJudge0Code(code, l, cases);
+        setRunResults(p => ({ ...p, [qItem.id]: res }));
+        return;
+      }
+
       const res = await runJudge0Code(code, l, cases);
       setRunResults(p => ({ ...p, [qItem.id]: res }));
       const updatedCodes = {
@@ -768,6 +776,44 @@ const TestPage: React.FC = () => {
                     <Play size={13} /> {runningCode ? 'Compiling & Running…' : 'Run Test Cases'}
                   </button>
                 </div>
+
+                {/* Policy Warning Banner */}
+                {(currentLang[q.id] || 'java') === 'java' && (
+                  <div style={{
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '6px 12px',
+                    marginBottom: 10,
+                    fontSize: 12,
+                    fontFamily: 'JetBrains Mono, monospace',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    color: '#fca5a5',
+                  }}>
+                    <ShieldAlert size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />
+                    <span><strong>[RESTRICTION ACTIVE]:</strong> Java <code>java.io.*</code> and <code>java.nio.*</code> packages are disabled. Use <code>java.util.Scanner</code> &amp; <code>System.out</code>.</span>
+                  </div>
+                )}
+                {(currentLang[q.id] || 'java') === 'c' && (
+                  <div style={{
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '6px 12px',
+                    marginBottom: 10,
+                    fontSize: 12,
+                    fontFamily: 'JetBrains Mono, monospace',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    color: '#fca5a5',
+                  }}>
+                    <ShieldAlert size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />
+                    <span><strong>[RESTRICTION ACTIVE]:</strong> C pointers (<code>*ptr</code>, <code>-&gt;</code>, <code>malloc/free</code>) are disabled. Use static arrays and value variables.</span>
+                  </div>
+                )}
 
                 {/* Monaco Code Editor */}
                 <div style={{

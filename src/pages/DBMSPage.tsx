@@ -14,7 +14,10 @@ import {
   MessageSquare, Terminal, Loader2,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { executeSqlInDb, parseColumns, parseRows, parseRowCells, type TableDef, type SqlQueryResult } from "../utils/sqlRunner";
+import {
+  executeSqlInDb, verifySqlMatch, parseColumns, parseRows, parseRowCells,
+  type TableDef, type SqlQueryResult, type SqlDialect, SQL_DIALECT_OPTIONS,
+} from "../utils/sqlRunner";
 
 interface DbmsQuestion {
   id: string;
@@ -75,11 +78,14 @@ const DBMSPage: React.FC = () => {
   const [showMySubmissions, setShowMySubmissions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // In-Browser SQLite Runner State
+  // In-Browser Multi-Dialect SQL Runner State (SQLite, MySQL, MSSQL)
+  const [selectedDialect, setSelectedDialect] = useState<Record<string, SqlDialect>>({});
   const [testResults, setTestResults] = useState<Record<string, SqlQueryResult>>({});
   const [runningTest, setRunningTest] = useState<Record<string, boolean>>({});
   const [referenceResults, setReferenceResults] = useState<Record<string, SqlQueryResult>>({});
   const [runningReference, setRunningReference] = useState<Record<string, boolean>>({});
+
+  const getDialect = (qId: string): SqlDialect => selectedDialect[qId] || 'sqlite';
 
   useEffect(() => {
     (async () => {
@@ -149,21 +155,22 @@ const DBMSPage: React.FC = () => {
     })();
   }, [user]);
 
-  // Execute student's SQL query in in-memory SQLite database
+  // Execute student's SQL query in in-memory SQLite database with dialect support
   const handleRunUserSql = async (q: DbmsQuestion) => {
     const sql = userQuery[q.id] || "";
     if (!sql.trim()) {
       toast.error("Please write a SQL query to run!");
       return;
     }
+    const dialect = getDialect(q.id);
     setRunningTest(p => ({ ...p, [q.id]: true }));
     try {
-      const res = await executeSqlInDb(sql, q.tableData, q.sampleSchema);
+      const res = await executeSqlInDb(sql, q.tableData, q.sampleSchema, dialect);
       setTestResults(p => ({ ...p, [q.id]: res }));
       if (res.success) {
-        toast.success(`Executed in ${res.executionTimeMs}ms (${res.values.length} rows returned)`);
+        toast.success(`[${dialect.toUpperCase()}] Executed in ${res.executionTimeMs}ms (${res.values.length} rows returned)`);
       } else {
-        toast.error("SQL Error: " + (res.error || "Query failed to execute"));
+        toast.error(`[${dialect.toUpperCase()}] SQL Error: ` + (res.error || "Query failed to execute"));
       }
     } catch (err: any) {
       toast.error("Runner error: " + err?.message);
@@ -203,11 +210,24 @@ const DBMSPage: React.FC = () => {
       const todayDate = new Date().toISOString().slice(0, 10);
       const earnedPts = POINTS[q.difficulty] || 10;
       
-      // Auto-verify if expectedQuery matches
-      const isExpectedMatch = Boolean(
+      const dialect = getDialect(q.id);
+
+      // Auto-verify if expectedQuery matches (direct text match OR relational output equivalence across dialects)
+      let isExpectedMatch = Boolean(
         q.expectedQuery && 
         normalizeSql(sql) === normalizeSql(q.expectedQuery)
       );
+
+      if (!isExpectedMatch && q.expectedQuery) {
+        try {
+          const matchRes = await verifySqlMatch(sql, q.expectedQuery, q.tableData, q.sampleSchema, dialect);
+          if (matchRes.match) {
+            isExpectedMatch = true;
+          }
+        } catch (e) {
+          console.warn("SQL auto-verify exception:", e);
+        }
+      }
 
       const status = isExpectedMatch ? "pass" : "pending";
       const pts = isExpectedMatch ? earnedPts : 0;
@@ -222,6 +242,7 @@ const DBMSPage: React.FC = () => {
         topic: q.topic,
         difficulty: q.difficulty,
         userQuery: sql,
+        dialect,
         status,
         points: pts,
         todayDate,
@@ -235,11 +256,12 @@ const DBMSPage: React.FC = () => {
         userName: profile.displayName || user.displayName || "Student",
         userEmail: user.email,
         problemId: q.id,
-        problemTitle: `[SQL] ${q.title}`,
-        language: "sql",
+        problemTitle: `[SQL/${dialect.toUpperCase()}] ${q.title}`,
+        language: `sql-${dialect}`,
         status: isExpectedMatch ? "accepted" : "pending",
         runtime: 14,
         score: pts,
+        code: sql,
         todayDate,
         createdAt: serverTimestamp(),
       });
@@ -637,15 +659,55 @@ const DBMSPage: React.FC = () => {
                             </div>
                           ) : null}
 
-                          {/* ── SQL Query Editor & In-Browser SQLite Test Runner ── */}
+                          {/* ── SQL Query Editor & Multi-Dialect Test Runner ── */}
                           <div style={{ marginBottom: 18 }}>
-                            <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
+                            <div className="flex items-center gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
                               <Send size={13} color="var(--yellow)" />
                               <span style={{ fontWeight: 700, fontSize: 13, color: "var(--yellow)" }}>
                                 {isSolved ? "Your Accepted SQL Query" : isFailed ? "Revise Your SQL Query" : "Write Your SQL Query"}
                               </span>
-                              <span style={{ fontSize: 10, color: "rgba(239,68,68,0.8)", marginLeft: "auto", display: "flex", alignItems: "center", gap: 3 }}>
-                                <ShieldOff size={9} /> Fair assessment mode
+
+                              {/* Dialect Selector Tabs */}
+                              <div style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                background: "rgba(0,0,0,0.45)",
+                                border: "1px solid rgba(255,255,255,0.1)",
+                                borderRadius: 8,
+                                padding: "2px 4px",
+                                marginLeft: "auto"
+                              }}>
+                                <span style={{ fontSize: 10, color: "var(--text-3)", padding: "0 6px", fontWeight: 700, letterSpacing: "0.05em" }}>DIALECT:</span>
+                                {SQL_DIALECT_OPTIONS.map(opt => {
+                                  const isActive = getDialect(q.id) === opt.id;
+                                  return (
+                                    <button
+                                      key={opt.id}
+                                      type="button"
+                                      disabled={isSolved}
+                                      onClick={() => setSelectedDialect(prev => ({ ...prev, [q.id]: opt.id }))}
+                                      title={opt.tip}
+                                      style={{
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        fontFamily: "JetBrains Mono, monospace",
+                                        padding: "3px 8px",
+                                        borderRadius: 6,
+                                        border: isActive ? "1px solid rgba(34,211,238,0.5)" : "1px solid transparent",
+                                        background: isActive ? "rgba(34,211,238,0.18)" : "transparent",
+                                        color: isActive ? "var(--cyan)" : "var(--text-3)",
+                                        cursor: isSolved ? "not-allowed" : "pointer",
+                                        transition: "all 0.15s ease",
+                                      }}>
+                                      {opt.icon} {opt.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              <span style={{ fontSize: 10, color: "rgba(239,68,68,0.8)", display: "flex", alignItems: "center", gap: 3 }}>
+                                <ShieldOff size={9} /> Fair assessment
                               </span>
                             </div>
 
@@ -653,7 +715,13 @@ const DBMSPage: React.FC = () => {
                               className="input"
                               rows={6}
                               style={{ fontFamily: "JetBrains Mono,monospace", fontSize: 13, resize: "vertical" }}
-                              placeholder={"Write your SQL query here...\n\nExample:\nSELECT name, salary\nFROM Employee\nWHERE salary > 50000\nORDER BY salary DESC;"}
+                              placeholder={`Write your ${getDialect(q.id).toUpperCase()} query here...\n\nExample (${getDialect(q.id).toUpperCase()}):\n${
+                                getDialect(q.id) === 'mysql'
+                                  ? 'SELECT `name`, IF(salary > 50000, "High", "Standard") AS tier\nFROM Employee\nORDER BY salary DESC LIMIT 5;'
+                                  : getDialect(q.id) === 'mssql'
+                                  ? 'SELECT TOP 5 [name], IIF(salary > 50000, \'High\', \'Standard\') AS tier\nFROM Employee\nORDER BY salary DESC;'
+                                  : 'SELECT name, salary\nFROM Employee\nWHERE salary > 50000\nORDER BY salary DESC LIMIT 5;'
+                              }`}
                               value={userQuery[q.id] || ""}
                               onChange={e => setUserQuery(p => ({ ...p, [q.id]: e.target.value }))}
                               onCopy={blockCopyPaste}
@@ -673,7 +741,7 @@ const DBMSPage: React.FC = () => {
 
                             {/* Runner and Submit Buttons */}
                             <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                              {/* Direct SQLite Runner Button */}
+                              {/* Direct Multi-Dialect Runner Button */}
                               <button
                                 onClick={() => handleRunUserSql(q)}
                                 disabled={runningTest[q.id] || !userQuery[q.id]?.trim()}
@@ -694,7 +762,7 @@ const DBMSPage: React.FC = () => {
                                 ) : (
                                   <Play size={13} />
                                 )}
-                                Run in SQLite Environment
+                                Run in {getDialect(q.id).toUpperCase()} Environment
                               </button>
 
                               {/* Submit Button */}
@@ -718,24 +786,31 @@ const DBMSPage: React.FC = () => {
                                   {isSubmitting ? (
                                     <><Loader2 size={13} style={{ animation: "spin-slow 0.8s linear infinite" }} /> Submitting...</>
                                   ) : isFailed ? (
-                                    <><Send size={13} /> Re-Submit Query</>
+                                    <><Send size={13} /> Re-Submit Query ({getDialect(q.id).toUpperCase()})</>
                                   ) : isPending ? (
-                                    <><Send size={13} /> Update Submission</>
+                                    <><Send size={13} /> Update Submission ({getDialect(q.id).toUpperCase()})</>
                                   ) : (
-                                    <><Send size={13} /> Submit Query (earn {pts} pts on pass)</>
+                                    <><Send size={13} /> Submit Query in {getDialect(q.id).toUpperCase()} (earn {pts} pts)</>
                                   )}
                                 </button>
                               )}
                             </div>
 
-                            {/* ── Direct SQLite Execution Output Table ── */}
+                            {/* ── Direct Dialect Execution Output Table ── */}
                             {qTestResult && (
                               <div style={{ marginTop: 14, background: "rgba(0,0,0,0.45)", border: `1px solid ${qTestResult.success ? "rgba(34,211,238,0.3)" : "rgba(239,68,68,0.35)"}`, borderRadius: 8, padding: 12 }}>
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
                                   <span style={{ fontSize: 12, fontWeight: 700, color: qTestResult.success ? "var(--cyan)" : "var(--red)", display: "flex", alignItems: "center", gap: 5 }}>
                                     <Terminal size={12} />
-                                    {qTestResult.success ? `SQLite Output (${qTestResult.executionTimeMs}ms, ${qTestResult.values.length} rows returned)` : "SQLite Error"}
+                                    {qTestResult.success
+                                      ? `${(qTestResult.dialect || getDialect(q.id)).toUpperCase()} Output (${qTestResult.executionTimeMs}ms, ${qTestResult.values.length} rows returned)`
+                                      : `${(qTestResult.dialect || getDialect(q.id)).toUpperCase()} Execution Error`}
                                   </span>
+                                  {qTestResult.engine && (
+                                    <span style={{ fontSize: 10, color: "var(--text-3)", fontFamily: "JetBrains Mono,monospace" }}>
+                                      engine: {qTestResult.engine}
+                                    </span>
+                                  )}
                                 </div>
                                 {qTestResult.success ? (
                                   qTestResult.columns.length === 0 ? (

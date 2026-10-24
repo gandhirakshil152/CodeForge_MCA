@@ -149,11 +149,22 @@ const Navbar: React.FC = () => {
   return (
     <>
       <nav className="navbar" style={{ boxShadow: scrolled ? '0 4px 30px rgba(0,0,0,0.5)' : 'none' }}>
-        <Link to="/" className="navbar-brand" style={{ textDecoration: 'none' }}>
-          <div className="navbar-logo">{'</>'}</div>
+        <Link to="/dashboard" className="navbar-brand" style={{ textDecoration: 'none' }}>
+          <div className="navbar-logo" style={{
+            background: 'linear-gradient(135deg, rgba(37,99,235,0.4), rgba(56,189,248,0.25))',
+            border: '1px solid rgba(56,189,248,0.5)',
+            boxShadow: '0 0 16px rgba(56,189,248,0.25)',
+          }}>{'</>'}</div>
           <div>
-            <span className="font-display gradient-text" style={{ fontSize: 20, fontWeight: 800 }}>CodeForge</span>
-            <span style={{ color: 'var(--purple-light)', fontSize: 10, display: 'block', marginTop: -4, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>MCA Platform</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="font-display gradient-text" style={{ fontSize: 20, fontWeight: 800 }}>CodeForge</span>
+              <span style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', color: 'var(--cyan)', borderRadius: 4, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>
+                v2.4
+              </span>
+            </div>
+            <span style={{ color: 'var(--cyan)', fontSize: 10, display: 'block', marginTop: -2, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace' }}>
+              MCA_TERMINAL // EVAL
+            </span>
           </div>
         </Link>
 

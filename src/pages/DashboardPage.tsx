@@ -292,6 +292,33 @@ const DashboardPage: React.FC = () => {
         <div className="page-content" style={{ maxWidth: 1280, margin: "0 auto", padding: "28px 20px" }}>
 
           {/* ══════════════════════════════════════════════════════════════
+              TECH HUD TELEMETRY BAR
+          ══════════════════════════════════════════════════════════════ */}
+          <div className="tech-status-bar">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="tech-pulse-dot" />
+                <span style={{ color: 'var(--green)', fontWeight: 700, letterSpacing: '0.05em' }}>SYSTEM ONLINE</span>
+              </div>
+              <span style={{ color: 'var(--text-3)' }}>|</span>
+              <span style={{ color: 'var(--text-2)' }}>HOST: <strong style={{ color: 'var(--cyan)' }}>MCA-FORGE-CLUSTER</strong></span>
+              <span style={{ color: 'var(--text-3)' }}>|</span>
+              <span style={{ color: 'var(--text-2)' }}>NODE: <strong style={{ color: '#fff' }}>v2.4.0-STABLE</strong></span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span className="tech-hud-badge" style={{ borderColor: 'rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.08)', color: '#fca5a5' }}>
+                JAVA_IO: RESTRICTED
+              </span>
+              <span className="tech-hud-badge" style={{ borderColor: 'rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.08)', color: '#fca5a5' }}>
+                C_PTR: DISABLED
+              </span>
+              <span className="tech-hud-badge" style={{ borderColor: 'rgba(16, 185, 129, 0.4)', background: 'rgba(16, 185, 129, 0.08)', color: '#6ee7b7' }}>
+                INTEGRITY: ENFORCED
+              </span>
+            </div>
+          </div>
+
+          {/* ══════════════════════════════════════════════════════════════
               WELCOME HEADER
           ══════════════════════════════════════════════════════════════ */}
           <div style={{ marginBottom: 24 }}>

@@ -9,11 +9,13 @@ import { useAuth } from '../contexts/AuthContext';
 import Editor from '@monaco-editor/react';
 import {
   Play, Send, ThumbsUp, ThumbsDown, MessageCircle, Clock,
-  Loader2, CheckCircle2, XCircle, Terminal, BookOpen, Trophy, RotateCcw,
+  Loader2, CheckCircle2, XCircle, Terminal, BookOpen, Trophy, RotateCcw, ShieldAlert,
+  Code2, Eye, Copy, Check,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Navbar from '../components/Navbar';
 import type { Problem } from './ProblemsPage';
+import { validateCodeRestrictions } from '../utils/codeValidator';
 
 // ── Language options ──────────────────────────────────────────────
 type LangId = 'java' | 'c' | 'python' | 'javascript';
@@ -46,7 +48,7 @@ s = input().strip()        # string`,
     tip: 'Arrays are space-separated on a single line. Each input() call reads the next line.',
   },
   java: {
-    title: 'Java — Scanner / BufferedReader',
+    title: 'Java — Scanner (java.io & java.nio Disabled)',
     snippet: `import java.util.Scanner;
 public class Main {
     public static void main(String[] args) {
@@ -58,10 +60,10 @@ public class Main {
         String s = sc.next();             // word
     }
 }`,
-    tip: 'sc.nextInt() reads the next token (space or newline separated).',
+    tip: '⚠️ MCA Policy: java.io and java.nio imports and operations are disabled. Use java.util.Scanner and System.out.',
   },
   c: {
-    title: 'C — scanf / printf',
+    title: 'C — scanf / printf (Pointers Disabled)',
     snippet: `#include <stdio.h>
 int main() {
     int n;
@@ -71,7 +73,7 @@ int main() {
         scanf("%d", &arr[i]); // space-separated array
     return 0;
 }`,
-    tip: 'scanf reads tokens separated by whitespace (space, newline, tab).',
+    tip: '⚠️ MCA Policy: Pointer types (*ptr), arrow operator (->), and malloc/free are disabled. Use static arrays and value types.',
   },
   javascript: {
     title: 'JavaScript — stdin via readline',
@@ -111,6 +113,8 @@ interface Submission {
   language: string;
   status: 'accepted' | 'wrong_answer' | 'error';
   runtime: number;
+  code?: string;
+  score?: number;
   createdAt: { toDate?: () => Date } | null;
 }
 
@@ -188,6 +192,11 @@ async function submitToJudge0(
   langId: LangId,
   stdin: string,
 ): Promise<Judge0Response> {
+  const policyCheck = validateCodeRestrictions(sourceCode, langId);
+  if (!policyCheck.valid) {
+    throw new Error(policyCheck.error || 'Code policy violation');
+  }
+
   // Judge0 CE compiles Java as Main.java — class MUST be named Main
   const src = langId === 'java' ? normaliseJavaClassName(sourceCode) : sourceCode;
 
@@ -241,6 +250,25 @@ async function runCode(
   langId: LangId,
   testCases: { input: string; expectedOutput: string }[],
 ): Promise<RunResult> {
+  const policyCheck = validateCodeRestrictions(code, langId);
+  if (!policyCheck.valid) {
+    const errMsg = policyCheck.error || 'Evaluation Policy Violation';
+    const cases = testCases && testCases.length > 0 ? testCases : [{ input: '', expectedOutput: '' }];
+    return {
+      status: 'error',
+      output: `⚠️ CodeForge MCA Policy Violation:\n\n${errMsg}`,
+      runtime: 0,
+      passed: 0,
+      total: cases.length,
+      testDetails: cases.map(tc => ({
+        input: tc.input || '',
+        expected: tc.expectedOutput || '',
+        got: errMsg,
+        passed: false,
+      })),
+    };
+  }
+
   const testDetails: RunResult['testDetails'] = [];
   let passed = 0;
   let totalRuntime = 0;
@@ -380,6 +408,17 @@ const ProblemPage: React.FC = () => {
   const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [expandedSubId, setExpandedSubId] = useState<string | null>(null);
+  const [submissionFilter, setSubmissionFilter] = useState<'all' | 'mine'>('all');
+  const [copiedSubId, setCopiedSubId] = useState<string | null>(null);
+  const [justSubmittedReceipt, setJustSubmittedReceipt] = useState<{
+    id: string;
+    status: string;
+    runtime: number;
+    score: number;
+    code: string;
+    language: string;
+  } | null>(null);
   const [newComment, setNewComment] = useState('');
   const [postingComment, setPostingComment] = useState(false);
   const [problemLiked, setProblemLiked] = useState(false);
@@ -437,10 +476,24 @@ const ProblemPage: React.FC = () => {
 
   const loadSubmissions = useCallback(async () => {
     if (!id) return;
-    const q = query(collection(db, 'submissions'), where('problemId', '==', id), orderBy('createdAt', 'desc'));
-    const snap = await getDocs(q);
-    setSubmissions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Submission)));
+    try {
+      const q = query(collection(db, 'submissions'), where('problemId', '==', id));
+      const snap = await getDocs(q);
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Submission));
+      docs.sort((a, b) => {
+        const tA = (a.createdAt as any)?.toMillis?.() || (a.createdAt as any)?.seconds * 1000 || 0;
+        const tB = (b.createdAt as any)?.toMillis?.() || (b.createdAt as any)?.seconds * 1000 || 0;
+        return tB - tA;
+      });
+      setSubmissions(docs);
+    } catch (e) {
+      console.warn('Submissions load note:', e);
+    }
   }, [id]);
+
+  useEffect(() => {
+    loadSubmissions();
+  }, [id, loadSubmissions]);
 
   useEffect(() => {
     if (activeTab === 'comments') loadComments();
@@ -459,6 +512,16 @@ const ProblemPage: React.FC = () => {
         expectedOutput: ex.output,
       }));
       const cases = visibleCases.length > 0 ? visibleCases : (problem.testCases?.slice(0, 3) || []);
+
+      const policyCheck = validateCodeRestrictions(code, lang);
+      if (!policyCheck.valid) {
+        toast.dismiss(toastId);
+        toast.error(policyCheck.error || 'Evaluation Policy Violation', { duration: 5000 });
+        const result = await runCode(code, lang, cases);
+        setRunResult(result);
+        return;
+      }
+
       const result = await runCode(code, lang, cases);
       setRunResult(result);
       toast.dismiss(toastId);
@@ -479,6 +542,15 @@ const ProblemPage: React.FC = () => {
     setRunResult(null);
     const toastId = toast.loading('🚀 Submitting against all test cases...');
     try {
+      const policyCheck = validateCodeRestrictions(code, lang);
+      if (!policyCheck.valid) {
+        toast.dismiss(toastId);
+        toast.error(policyCheck.error || 'Evaluation Policy Violation', { duration: 5000 });
+        const result = await runCode(code, lang, problem.testCases || []);
+        setRunResult(result);
+        return;
+      }
+
       const result = await runCode(code, lang, problem.testCases || []);
       setRunResult(result);
       toast.dismiss(toastId);
@@ -493,7 +565,7 @@ const ProblemPage: React.FC = () => {
         : 0;
 
       const todayDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD for dashboard daily queries
-      await addDoc(collection(db, 'submissions'), {
+      const docRef = await addDoc(collection(db, 'submissions'), {
         userId: user.uid,
         userName: profile.displayName,
         problemId: id,
@@ -506,6 +578,18 @@ const ProblemPage: React.FC = () => {
         todayDate,  // ← required for Dashboard daily task progress tracking
         createdAt: serverTimestamp(),
       });
+
+      setJustSubmittedReceipt({
+        id: docRef.id,
+        status: result.status,
+        runtime: result.runtime,
+        score: baseScore,
+        code,
+        language: lang,
+      });
+
+      // Reload submissions immediately so student sees their entry in history
+      loadSubmissions();
 
       if (result.status === 'accepted') {
         // Check if already solved
@@ -751,38 +835,191 @@ const ProblemPage: React.FC = () => {
           )}
 
           {/* Submissions tab */}
-          {activeTab === 'submissions' && (
-            <div>
-              {submissions.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-3)' }}>
-                  <Trophy size={40} style={{ marginBottom: 12, opacity: 0.3 }} />
-                  <p>No submissions yet. Be the first!</p>
+          {activeTab === 'submissions' && (() => {
+            const displayedSubs = submissions.filter(s => {
+              if (submissionFilter === 'mine') return s.userId === user?.uid;
+              return true;
+            });
+            const myCount = submissions.filter(s => s.userId === user?.uid).length;
+
+            return (
+              <div>
+                {/* Filter Controls */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    className={`btn btn-sm ${submissionFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ fontSize: 11, padding: '4px 10px' }}
+                    onClick={() => setSubmissionFilter('all')}>
+                    All Submissions ({submissions.length})
+                  </button>
+                  <button
+                    className={`btn btn-sm ${submissionFilter === 'mine' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ fontSize: 11, padding: '4px 10px' }}
+                    onClick={() => setSubmissionFilter('mine')}>
+                    My Submissions ({myCount})
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ marginLeft: 'auto', fontSize: 11, padding: '4px 8px', color: 'var(--text-3)' }}
+                    onClick={loadSubmissions}
+                    title="Refresh Submissions">
+                    <RotateCcw size={12} /> Refresh
+                  </button>
                 </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {submissions.map(s => (
-                    <div key={s.id} className="glass-card" style={{ padding: '14px 18px' }}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="avatar" style={{ width: 30, height: 30, fontSize: 12 }}>{s.userName?.[0]?.toUpperCase() || 'U'}</div>
-                          <div>
-                            <div style={{ fontWeight: 600, fontSize: 14 }}>{s.userName}</div>
-                            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{s.language?.toUpperCase()} • {s.runtime}ms</div>
+
+                {displayedSubs.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '50px 0', color: 'var(--text-3)', background: 'rgba(0,0,0,0.2)', borderRadius: 8, border: '1px dashed rgba(255,255,255,0.08)' }}>
+                    <Trophy size={36} style={{ marginBottom: 10, opacity: 0.3 }} />
+                    <p style={{ fontSize: 13, marginBottom: 6 }}>
+                      {submissionFilter === 'mine' ? "You haven't submitted this problem yet." : "No submissions recorded yet. Be the first!"}
+                    </p>
+                    {submissionFilter === 'mine' && (
+                      <span style={{ fontSize: 11, color: 'var(--purple-light)' }}>
+                        Write your code and click Submit to test and store your submission!
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {displayedSubs.map(s => {
+                      const isMine = s.userId === user?.uid;
+                      const isExpanded = expandedSubId === s.id;
+                      const isCopied = copiedSubId === s.id;
+                      const dateStr = s.createdAt?.toDate?.()
+                        ? s.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })
+                        : 'Recently';
+
+                      return (
+                        <div key={s.id} className="glass-card" style={{ padding: '12px 16px', border: isMine ? '1px solid rgba(139,92,246,0.35)' : '1px solid var(--border)' }}>
+                          <div className="flex items-center justify-between" style={{ flexWrap: 'wrap', gap: 8 }}>
+                            <div className="flex items-center gap-3">
+                              <div className="avatar" style={{ width: 30, height: 30, fontSize: 12, background: isMine ? 'linear-gradient(135deg,var(--purple),var(--cyan))' : undefined }}>
+                                {s.userName?.[0]?.toUpperCase() || 'U'}
+                              </div>
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span>{s.userName}</span>
+                                  {isMine && <span className="badge badge-purple" style={{ fontSize: 9, padding: '1px 5px' }}>You</span>}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+                                  <span style={{ fontFamily: 'JetBrains Mono, monospace', background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: 3, color: 'var(--text-2)' }}>
+                                    {s.language?.toUpperCase()}
+                                  </span>
+                                  <span>•</span>
+                                  <span>{s.runtime}ms</span>
+                                  {typeof s.score === 'number' && s.score > 0 && (
+                                    <>
+                                      <span>•</span>
+                                      <span style={{ color: 'var(--yellow)', fontWeight: 700 }}>+{s.score} pts</span>
+                                    </>
+                                  )}
+                                  <span>•</span>
+                                  <span>{dateStr}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {s.status === 'accepted' ? <CheckCircle2 size={15} color="var(--green)" /> : <XCircle size={15} color="var(--red)" />}
+                              <span className={`badge ${s.status === 'accepted' ? 'badge-green' : 'badge-red'}`} style={{ fontSize: 10 }}>
+                                {s.status === 'accepted' ? 'Accepted' : s.status === 'wrong_answer' ? 'Wrong Answer' : 'Error'}
+                              </span>
+                              {s.code && (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedSubId(isExpanded ? null : s.id)}
+                                  className="btn btn-ghost btn-sm"
+                                  style={{
+                                    fontSize: 11,
+                                    padding: '3px 8px',
+                                    gap: 4,
+                                    color: isExpanded ? 'var(--cyan)' : 'var(--text-2)',
+                                    border: isExpanded ? '1px solid rgba(34,211,238,0.3)' : '1px solid var(--border)',
+                                    background: isExpanded ? 'rgba(34,211,238,0.08)' : 'transparent',
+                                  }}>
+                                  <Code2 size={12} />
+                                  {isExpanded ? 'Hide Code' : 'View Code'}
+                                </button>
+                              )}
+                            </div>
                           </div>
+
+                          {/* Expandable Submitted Code Inspector */}
+                          {isExpanded && s.code && (
+                            <div style={{
+                              marginTop: 10,
+                              background: 'rgba(5, 5, 12, 0.95)',
+                              border: '1px solid rgba(34,211,238,0.25)',
+                              borderRadius: 6,
+                              overflow: 'hidden',
+                            }}>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '6px 12px',
+                                background: 'rgba(34,211,238,0.06)',
+                                borderBottom: '1px solid rgba(34,211,238,0.15)',
+                                fontSize: 11,
+                                fontFamily: 'JetBrains Mono, monospace',
+                              }}>
+                                <span style={{ color: 'var(--cyan)' }}>
+                                  Submitted {s.language.toUpperCase()} Solution ({s.code.split('\n').length} lines)
+                                </span>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(s.code || '');
+                                      setCopiedSubId(s.id);
+                                      toast.success('Code copied to clipboard!');
+                                      setTimeout(() => setCopiedSubId(null), 2000);
+                                    }}
+                                    className="btn btn-ghost btn-sm"
+                                    style={{ fontSize: 10, padding: '2px 7px', gap: 3 }}>
+                                    {isCopied ? <Check size={11} color="var(--green)" /> : <Copy size={11} />}
+                                    {isCopied ? 'Copied' : 'Copy'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const sLang = (s.language || 'python').toLowerCase() as LangId;
+                                      if (LANG_OPTIONS.some(l => l.id === sLang)) {
+                                        switchLang(sLang);
+                                      }
+                                      setCode(s.code || '');
+                                      toast.success(`Loaded ${s.language.toUpperCase()} submission into editor!`);
+                                    }}
+                                    className="btn btn-ghost btn-sm"
+                                    style={{ fontSize: 10, padding: '2px 7px', gap: 3, color: 'var(--purple-light)' }}>
+                                    <RotateCcw size={11} />
+                                    Load into Editor
+                                  </button>
+                                </div>
+                              </div>
+                              <pre style={{
+                                margin: 0,
+                                padding: '10px 12px',
+                                fontFamily: 'JetBrains Mono, monospace',
+                                fontSize: 12,
+                                lineHeight: 1.5,
+                                color: 'var(--text-1)',
+                                overflowX: 'auto',
+                                maxHeight: 260,
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-all',
+                              }}>
+                                {s.code}
+                              </pre>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          {s.status === 'accepted' ? <CheckCircle2 size={16} color="var(--green)" /> : <XCircle size={16} color="var(--red)" />}
-                          <span className={`badge ${s.status === 'accepted' ? 'badge-green' : 'badge-red'}`} style={{ fontSize: 10 }}>
-                            {s.status === 'accepted' ? 'Accepted' : s.status === 'wrong_answer' ? 'Wrong Answer' : 'Error'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Comments tab */}
           {activeTab === 'comments' && (
@@ -865,6 +1102,89 @@ const ProblemPage: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* ── Just Submitted Receipt Banner ── */}
+          {justSubmittedReceipt && (
+            <div style={{
+              background: justSubmittedReceipt.status === 'accepted' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+              borderBottom: `1px solid ${justSubmittedReceipt.status === 'accepted' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+              padding: '8px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 8,
+              fontSize: 12,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {justSubmittedReceipt.status === 'accepted' ? (
+                  <CheckCircle2 size={15} color="var(--green)" />
+                ) : (
+                  <XCircle size={15} color="var(--red)" />
+                )}
+                <span style={{ fontWeight: 700, color: justSubmittedReceipt.status === 'accepted' ? 'var(--green)' : 'var(--red)' }}>
+                  {justSubmittedReceipt.status === 'accepted' ? 'Submission Evaluated & Accepted!' : 'Submission Recorded & Evaluated'}
+                </span>
+                <span style={{ color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
+                  [{justSubmittedReceipt.language.toUpperCase()}] • {justSubmittedReceipt.runtime}ms
+                  {justSubmittedReceipt.score > 0 ? ` • +${justSubmittedReceipt.score} pts` : ''}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ padding: '2px 8px', fontSize: 11, color: 'var(--cyan)', border: '1px solid rgba(34,211,238,0.3)' }}
+                  onClick={() => {
+                    setActiveTab('submissions');
+                    setSubmissionFilter('mine');
+                    setExpandedSubId(justSubmittedReceipt.id);
+                  }}>
+                  <Eye size={12} /> View in Submissions History
+                </button>
+                <button
+                  type="button"
+                  style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', padding: '0 4px', fontSize: 13 }}
+                  onClick={() => setJustSubmittedReceipt(null)}>
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Policy Restriction Banner ── */}
+          {lang === 'java' && (
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.08)',
+              borderBottom: '1px solid rgba(239, 68, 68, 0.25)',
+              padding: '6px 14px',
+              fontSize: 12,
+              fontFamily: 'JetBrains Mono, monospace',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              color: '#fca5a5',
+            }}>
+              <ShieldAlert size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />
+              <span><strong>[RESTRICTION ACTIVE]:</strong> Java <code>java.io.*</code> &amp; <code>java.nio.*</code> are disabled. Use <code>java.util.Scanner</code> &amp; <code>System.out</code>.</span>
+            </div>
+          )}
+          {lang === 'c' && (
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.08)',
+              borderBottom: '1px solid rgba(239, 68, 68, 0.25)',
+              padding: '6px 14px',
+              fontSize: 12,
+              fontFamily: 'JetBrains Mono, monospace',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              color: '#fca5a5',
+            }}>
+              <ShieldAlert size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />
+              <span><strong>[RESTRICTION ACTIVE]:</strong> C pointers (<code>*ptr</code>, <code>-&gt;</code>, <code>malloc/free</code>) are disabled. Use static arrays and value variables.</span>
+            </div>
+          )}
 
           {/* ── Language Input Guide ── */}
           <LangGuide lang={lang} />

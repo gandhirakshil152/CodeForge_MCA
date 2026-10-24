@@ -143,6 +143,27 @@ const ProblemsPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Tech Evaluation Rules Banner */}
+          <div className="tech-status-bar">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span className="tech-pulse-dot" />
+              <span style={{ color: 'var(--cyan)', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>
+                MCA COMPILER RULES:
+              </span>
+              <span style={{ color: 'var(--text-2)', fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}>
+                Algorithmic standard policy enforced.
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span className="tech-hud-badge" style={{ borderColor: 'rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.08)', color: '#fca5a5' }}>
+                JAVA: IO DISABLED (SCANNER ONLY)
+              </span>
+              <span className="tech-hud-badge" style={{ borderColor: 'rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.08)', color: '#fca5a5' }}>
+                C: POINTERS DISABLED (ARRAYS ONLY)
+              </span>
+            </div>
+          </div>
+
           {/* ══════════════════════════════════════════════════════════════
               DAILY TASKS SECTION (Coding in 4 Languages + DBMS Query)
           ══════════════════════════════════════════════════════════════ */}

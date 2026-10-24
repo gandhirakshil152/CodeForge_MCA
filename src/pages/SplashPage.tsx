@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Zap, Code2, Trophy, Users, Terminal, Star, ArrowRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import Navbar from '../components/Navbar';
 
 // Matrix rain canvas effect
 const MatrixRain: React.FC = () => {
@@ -60,40 +61,42 @@ const SplashPage: React.FC = () => {
 
   return (
     <div style={{ minHeight: '100vh', overflowX: 'hidden' }}>
+      <Navbar />
+
       {/* ── Hero ─── */}
-      <section className="splash-page" style={{ minHeight: '100vh' }}>
+      <section className="splash-page" style={{ minHeight: '100vh', padding: 'clamp(90px, 14vh, 130px) 16px 48px', overflow: 'hidden' }}>
         <div className="splash-bg" />
         <div className="splash-grid" />
         <MatrixRain />
 
         {/* Orbs */}
-        <div className="orb orb-purple animate-float" style={{ width: 500, height: 500, top: -100, left: -200 }} />
-        <div className="orb orb-cyan animate-float" style={{ width: 400, height: 400, bottom: -150, right: -150, animationDelay: '1.5s' }} />
-        <div className="orb orb-pink" style={{ width: 300, height: 300, top: '40%', right: '20%', filter: 'blur(100px)', opacity: 0.3 }} />
+        <div className="orb orb-purple animate-float" style={{ width: 450, height: 450, top: -100, left: -150, maxWidth: '100vw' }} />
+        <div className="orb orb-cyan animate-float" style={{ width: 380, height: 380, bottom: -120, right: -120, animationDelay: '1.5s', maxWidth: '100vw' }} />
+        <div className="orb orb-pink" style={{ width: 260, height: 260, top: '40%', right: '10%', filter: 'blur(100px)', opacity: 0.25 }} />
 
-        <div className="container" style={{ position: 'relative', zIndex: 10, textAlign: 'center' }}>
+        <div className="container" style={{ position: 'relative', zIndex: 10, textAlign: 'center', maxWidth: 960 }}>
           {/* Badge */}
-          <div className="flex justify-center" style={{ marginBottom: 24 }}>
-            <div className="badge badge-purple animate-pulse-glow" style={{ padding: '8px 18px', fontSize: 12 }}>
+          <div className="flex justify-center" style={{ marginBottom: 20 }}>
+            <div className="badge badge-purple animate-pulse-glow" style={{ padding: '6px 16px', fontSize: 12 }}>
               <Zap size={12} /> MCA Placement Prep Platform • v2.0
             </div>
           </div>
 
           {/* Main Heading */}
-          <h1 className="font-display animate-fade-up" style={{ fontSize: 'clamp(48px, 8vw, 96px)', fontWeight: 800, lineHeight: 1.05, marginBottom: 24 }}>
+          <h1 className="font-display animate-fade-up" style={{ fontSize: 'clamp(34px, 7vw, 84px)', fontWeight: 800, lineHeight: 1.08, marginBottom: 20 }}>
             <span className="gradient-text">Code.</span>{' '}
             <span style={{ color: 'var(--text-1)' }}>Compete.</span>
             <br />
             <span style={{ color: 'var(--cyan)' }}>Conquer.</span>
           </h1>
 
-          <p className="animate-fade-up" style={{ fontSize: 'clamp(16px, 2.5vw, 22px)', color: 'var(--text-2)', maxWidth: 600, margin: '0 auto 40px', lineHeight: 1.7, animationDelay: '0.1s' }}>
+          <p className="animate-fade-up" style={{ fontSize: 'clamp(15px, 2vw, 19px)', color: 'var(--text-2)', maxWidth: 620, margin: '0 auto 36px', lineHeight: 1.7, animationDelay: '0.1s' }}>
             The comprehensive coding and assessment portal for <strong style={{ color: 'var(--purple-light)' }}>MCA students</strong>. 
             Practice industry-level algorithmic problems, execute SQL lab queries, and succeed in technical campus placements.
           </p>
 
           {/* CTA Buttons */}
-          <div className="flex justify-center gap-4 flex-wrap animate-fade-up" style={{ animationDelay: '0.2s', marginBottom: 64 }}>
+          <div className="flex justify-center gap-3 flex-wrap animate-fade-up" style={{ animationDelay: '0.2s', marginBottom: 48 }}>
             {user ? (
               <>
                 <Link to="/problems" className="btn btn-primary btn-lg">
@@ -105,10 +108,10 @@ const SplashPage: React.FC = () => {
               </>
             ) : (
               <>
-                <Link to="/register" className="btn btn-primary btn-lg" style={{ fontSize: 16, padding: '16px 40px' }}>
+                <Link to="/register" className="btn btn-primary btn-lg" style={{ fontSize: 15, padding: '14px 32px' }}>
                   <Zap size={18} /> Get Started Free <ArrowRight size={16} />
                 </Link>
-                <Link to="/login" className="btn btn-outline btn-lg">
+                <Link to="/login" className="btn btn-outline btn-lg" style={{ fontSize: 15, padding: '14px 28px' }}>
                   Already a coder? Login
                 </Link>
               </>
@@ -116,21 +119,21 @@ const SplashPage: React.FC = () => {
           </div>
 
           {/* Stats */}
-          <div className="flex justify-center gap-8 flex-wrap animate-fade-up" style={{ animationDelay: '0.3s' }}>
+          <div className="flex justify-center gap-6 flex-wrap animate-fade-up" style={{ animationDelay: '0.3s' }}>
             {stats.map((s, i) => (
-              <div key={i} style={{ textAlign: 'center' }}>
-                <div className="font-display" style={{ fontSize: 40, fontWeight: 800, color: i === 0 ? 'var(--purple-light)' : i === 1 ? 'var(--cyan)' : i === 2 ? 'var(--pink)' : 'var(--yellow)' }}>{s.num}</div>
-                <div style={{ fontSize: 13, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 2 }}>{s.label}</div>
+              <div key={i} style={{ textAlign: 'center', minWidth: 100, padding: '8px 12px' }}>
+                <div className="font-display" style={{ fontSize: 'clamp(28px, 4vw, 40px)', fontWeight: 800, color: i === 0 ? 'var(--purple-light)' : i === 1 ? 'var(--cyan)' : i === 2 ? 'var(--pink)' : 'var(--yellow)' }}>{s.num}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 4 }}>{s.label}</div>
               </div>
             ))}
           </div>
-        </div>
 
-        {/* Scroll indicator */}
-        <div style={{ position: 'absolute', bottom: 32, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, color: 'var(--text-3)', fontSize: 12 }}>
-          <span>Scroll to explore</span>
-          <div style={{ width: 20, height: 32, border: '2px solid var(--border-glow)', borderRadius: 99, display: 'flex', justifyContent: 'center', padding: 4 }}>
-            <div style={{ width: 3, height: 8, background: 'var(--purple)', borderRadius: 99, animation: 'float 1.5s ease-in-out infinite' }} />
+          {/* Scroll indicator - safely in document flow so it never overrides stats */}
+          <div style={{ marginTop: 44, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: 'var(--text-3)', fontSize: 11 }}>
+            <span>Scroll to explore</span>
+            <div style={{ width: 18, height: 28, border: '1px solid var(--border-glow)', borderRadius: 99, display: 'flex', justifyContent: 'center', padding: 3 }}>
+              <div style={{ width: 3, height: 6, background: 'var(--purple)', borderRadius: 99, animation: 'float 1.5s ease-in-out infinite' }} />
+            </div>
           </div>
         </div>
       </section>

@@ -62,6 +62,9 @@ export interface RunResult {
   testDetails: TestCaseResult[];
 }
 
+import { validateCodeRestrictions, type CodeValidationResult } from './codeValidator';
+export { validateCodeRestrictions, type CodeValidationResult };
+
 const JUDGE0_URL = 'https://ce.judge0.com';
 
 export async function submitToJudge0(
@@ -69,6 +72,11 @@ export async function submitToJudge0(
   langId: LangId,
   stdin: string,
 ): Promise<Judge0Response> {
+  const policyCheck = validateCodeRestrictions(sourceCode, langId);
+  if (!policyCheck.valid) {
+    throw new Error(policyCheck.error || 'Code policy violation');
+  }
+
   const src = langId === 'java' ? normaliseJavaClassName(sourceCode) : sourceCode;
   const normalStdin = stdin.endsWith('\n') ? stdin : stdin + '\n';
 
@@ -114,6 +122,25 @@ export async function runJudge0Code(
   langId: LangId,
   testCases: { input: string; expectedOutput: string }[],
 ): Promise<RunResult> {
+  const policyCheck = validateCodeRestrictions(code, langId);
+  if (!policyCheck.valid) {
+    const errMsg = policyCheck.error || 'Evaluation Policy Violation';
+    const cases = testCases && testCases.length > 0 ? testCases : [{ input: '', expectedOutput: '' }];
+    return {
+      status: 'error',
+      output: `⚠️ CodeForge MCA Policy Violation:\n\n${errMsg}`,
+      runtime: 0,
+      passed: 0,
+      total: cases.length,
+      testDetails: cases.map(tc => ({
+        input: tc.input || '',
+        expected: tc.expectedOutput || '',
+        got: errMsg,
+        passed: false,
+      })),
+    };
+  }
+
   if (!testCases || testCases.length === 0) {
     // If no test cases provided, run with empty input
     const start = Date.now();
