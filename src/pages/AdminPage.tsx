@@ -12,11 +12,12 @@ import {
   Save, X, AlertTriangle, UserCheck, UserX, Loader2,
   Database, CheckCircle2, Activity, Award, Clock, Zap,
   Eye, EyeOff, Table2, ThumbsUp, ThumbsDown, Calendar, ListChecks,
-  ClipboardList, Code2,
+  ClipboardList, Code2, Play, MessageSquare, Terminal,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { Problem } from './ProblemsPage';
 import { AdminTestsTab } from '../components/AdminTestsTab';
+import { executeSqlInDb, type SqlQueryResult } from '../utils/sqlRunner';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AdminTab = 'problems' | 'dbms' | 'tests' | 'users' | 'stats' | 'submissions' | 'daily_tasks';
@@ -147,6 +148,17 @@ const AdminPage: React.FC = () => {
   const [deletingSubId, setDeletingSubId] = useState<string | null>(null);
   const [gradingId, setGradingId] = useState<string | null>(null);
 
+  // Interactive DBMS Evaluation Modal State
+  const [inspectingSub, setInspectingSub] = useState<any | null>(null);
+  const [adminRemarksDraft, setAdminRemarksDraft] = useState('');
+  const [studentQueryResult, setStudentQueryResult] = useState<SqlQueryResult | null>(null);
+  const [expectedQueryResult, setExpectedQueryResult] = useState<SqlQueryResult | null>(null);
+  const [runningStudentSql, setRunningStudentSql] = useState(false);
+  const [runningExpectedSql, setRunningExpectedSql] = useState(false);
+  const [savingRemarksId, setSavingRemarksId] = useState<string | null>(null);
+  const [editingRemarksSubId, setEditingRemarksSubId] = useState<string | null>(null);
+  const [inlineRemarksDraft, setInlineRemarksDraft] = useState('');
+
   // Daily Tasks state
   const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
   const [taskForm, setTaskForm] = useState({ title: '', description: '', type: 'code' as 'code'|'dbms'|'any', targetCount: 1, date: new Date().toISOString().slice(0,10), points: 50 });
@@ -204,15 +216,22 @@ const AdminPage: React.FC = () => {
 
   const DBMS_POINTS: Record<string, number> = { easy: 10, medium: 25, hard: 50 };
 
-  const gradeDbmsSubmission = async (sub: any, verdict: 'pass' | 'fail') => {
+  const gradeDbmsSubmission = async (sub: any, verdict: 'pass' | 'fail', customRemarks?: string) => {
     setGradingId(sub.id);
     try {
+      const qObj = dbmsQuestions.find(q => q.id === sub.questionId);
+      const title = qObj?.title || sub.questionTitle || 'DBMS Question';
+      const remarks = customRemarks !== undefined ? customRemarks : (sub.adminRemarks || '');
       const pts = verdict === 'pass' ? (DBMS_POINTS[sub.difficulty] ?? 10) : 0;
+
       await updateDoc(doc(db, 'dbms_submissions', sub.id), {
         status: verdict,
         points: pts,
+        adminRemarks: remarks,
+        questionTitle: title,
         gradedAt: serverTimestamp(),
       });
+
       if (verdict === 'pass') {
         await updateDoc(doc(db, 'users', sub.userId), {
           score: increment(pts),
@@ -225,22 +244,109 @@ const AdminPage: React.FC = () => {
           userName: sub.userName,
           userEmail: sub.userEmail,
           problemId: sub.questionId,
-          problemTitle: `[SQL] ${sub.questionTitle}`,
+          problemTitle: `[SQL] ${title}`,
           language: 'sql',
           status: 'accepted',
+          adminRemarks: remarks,
           runtime: 12,
           score: pts,
           todayDate: new Date().toISOString().slice(0, 10),
           createdAt: serverTimestamp(),
         });
 
-        toast.success(`Marked PASS — +${pts} pts awarded & submission registered for ${sub.userName}`);
+        toast.success(`Marked PASS (+${pts} pts) & awarded to ${sub.userName}`);
       } else {
-        toast.success(`Marked FAIL for ${sub.userName}`);
+        await addDoc(collection(db, 'submissions'), {
+          userId: sub.userId,
+          userName: sub.userName,
+          userEmail: sub.userEmail,
+          problemId: sub.questionId,
+          problemTitle: `[SQL] ${title}`,
+          language: 'sql',
+          status: 'wrong_answer',
+          adminRemarks: remarks,
+          runtime: 15,
+          score: 0,
+          todayDate: new Date().toISOString().slice(0, 10),
+          createdAt: serverTimestamp(),
+        });
+        toast.success(`Marked FAIL / Needs Revision for ${sub.userName}${remarks ? ' (remarks saved)' : ''}`);
+      }
+
+      if (inspectingSub?.id === sub.id) {
+        setInspectingSub(null);
       }
       loadData();
     } catch (err) { toast.error('Grading failed!'); console.error(err); }
     finally { setGradingId(null); }
+  };
+
+  const saveAdminRemarksOnly = async (subId: string, remarks: string) => {
+    setSavingRemarksId(subId);
+    try {
+      await updateDoc(doc(db, 'dbms_submissions', subId), {
+        adminRemarks: remarks,
+      });
+      toast.success('Remarks updated for student!');
+      setEditingRemarksSubId(null);
+      loadData();
+    } catch (err) {
+      toast.error('Failed to update remarks');
+    } finally {
+      setSavingRemarksId(null);
+    }
+  };
+
+  const openDbmsInspector = (sub: any) => {
+    setInspectingSub(sub);
+    setAdminRemarksDraft(sub.adminRemarks || '');
+    setStudentQueryResult(null);
+    setExpectedQueryResult(null);
+  };
+
+  const runStudentSqlInModal = async (sub: any) => {
+    const q = dbmsQuestions.find(x => x.id === sub.questionId);
+    const sql = sub.userQuery || sub.userOutput || '';
+    if (!sql.trim()) {
+      toast.error('No SQL query found in this submission!');
+      return;
+    }
+    setRunningStudentSql(true);
+    try {
+      const res = await executeSqlInDb(sql, q?.tableData, q?.sampleSchema);
+      setStudentQueryResult(res);
+      if (res.success) {
+        toast.success(`Executed in ${res.executionTimeMs}ms (${res.values.length} rows returned)`);
+      } else {
+        toast.error('SQLite execution error: ' + (res.error || 'Failed'));
+      }
+    } catch (e: any) {
+      toast.error('Runner exception: ' + e?.message);
+    } finally {
+      setRunningStudentSql(false);
+    }
+  };
+
+  const runExpectedSqlInModal = async (sub: any) => {
+    const q = dbmsQuestions.find(x => x.id === sub.questionId);
+    if (!q?.expectedQuery) {
+      toast.error('No Reference/Expected SQL query configured for this question.');
+      return;
+    }
+    setRunningExpectedSql(true);
+    try {
+      const res = await executeSqlInDb(q.expectedQuery, q.tableData, q.sampleSchema);
+      setExpectedQueryResult(res);
+      if (res.success) {
+        toast.success(`Reference query ran in ${res.executionTimeMs}ms (${res.values.length} rows)`);
+      } else {
+        toast.error('SQLite execution error: ' + (res.error || 'Failed'));
+      }
+    } catch (e: any) {
+      toast.error('Runner exception: ' + e?.message);
+    } finally {
+      setRunningExpectedSql(false);
+    }
   };
 
   const deleteCodeSubmission = async (id: string) => {
@@ -1042,82 +1148,442 @@ const AdminPage: React.FC = () => {
               {/* DBMS Submissions */}
               <div className="glass-card" style={{ overflow:'hidden', padding:0, marginBottom:20 }}>
                 <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-                  <Database size={14} color="var(--cyan)"/>
-                  <span style={{ fontWeight:700, fontSize:14 }}>DBMS Submissions</span>
-                  <span style={{ fontSize:11, color:'var(--text-3)' }}>{dbmsSubmissions.filter((s:any)=>s.status==='pending').length} pending</span>
+                  <Database size={15} color="var(--cyan)"/>
+                  <span style={{ fontWeight:700, fontSize:14 }}>DBMS Submissions & Lab Assessments</span>
+                  <span style={{ fontSize:11, color:'var(--yellow)', background:'rgba(245,158,11,0.1)', padding:'2px 8px', borderRadius:99, border:'1px solid rgba(245,158,11,0.25)' }}>
+                    {dbmsSubmissions.filter((s:any)=>s.status==='pending').length} pending review
+                  </span>
                   <span style={{ fontSize:11, color:'var(--text-3)', marginLeft:'auto' }}>{dbmsSubmissions.length} total</span>
                 </div>
                 {dbmsSubmissions.length === 0 ? (
                   <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--text-3)' }}><p>No DBMS submissions yet.</p></div>
                 ) : (
                   <div style={{ overflowX:'auto' }}>
-                    <table style={{ width:'100%', minWidth:800 }}>
+                    <table style={{ width:'100%', minWidth:920 }}>
                       <thead><tr>
-                        <th>Student</th><th>Question</th><th>Difficulty</th><th>SQL Query</th><th>Status</th><th>Pts</th><th>Grade</th><th>Del</th>
+                        <th>Student</th>
+                        <th>Question & Topic</th>
+                        <th>Diff</th>
+                        <th>Student SQL Query</th>
+                        <th>Status</th>
+                        <th>Pts</th>
+                        <th>Faculty Remarks</th>
+                        <th>Grade / Test</th>
+                        <th>Del</th>
                       </tr></thead>
                       <tbody>
-                        {dbmsSubmissions.map((s: any) => (
-                          <tr key={s.id} style={{ borderBottom:'1px solid rgba(255,255,255,0.04)', background: s.status==='pending'?'rgba(245,158,11,0.03)':undefined }}>
-                            <td>
-                              <div style={{ fontWeight:500, fontSize:13 }}>{s.userName}</div>
-                              <div style={{ fontSize:10, color:'var(--text-3)' }}>{s.userEmail}</div>
-                            </td>
-                            <td style={{ fontSize:12, maxWidth:160 }}>
-                              <div style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.questionTitle}</div>
-                              <div style={{ fontSize:10, color:'var(--text-3)' }}>{s.topic}</div>
-                            </td>
-                            <td>
-                              <span className={`badge ${s.difficulty==='easy'?'diff-easy':s.difficulty==='medium'?'diff-medium':'diff-hard'}`}>{s.difficulty}</span>
-                            </td>
-                            <td style={{ maxWidth:220 }}>
-                              <details style={{ cursor:'pointer' }}>
-                                <summary style={{ fontSize:10, color:'var(--cyan)', cursor:'pointer' }}>View Query</summary>
-                                <pre style={{ fontSize:11, fontFamily:'JetBrains Mono,monospace', color:'var(--text-1)', background:'rgba(0,0,0,0.35)', padding:'8px 10px', borderRadius:6, marginTop:4, maxHeight:120, overflow:'auto', whiteSpace:'pre-wrap', border:'1px solid rgba(34,211,238,0.12)' }}>{s.userQuery || s.userOutput || '(no query)'}</pre>
-                              </details>
-                            </td>
-                            <td>
-                              <span style={{ fontWeight:700, fontSize:12,
-                                color: s.status==='pass'?'var(--green)':s.status==='fail'?'var(--red)':'var(--yellow)' }}>
-                                {s.status==='pass' ? '✅ Pass' : s.status==='fail' ? '❌ Fail' : '⏳ Pending'}
-                              </span>
-                            </td>
-                            <td style={{ fontWeight:700, color:'var(--yellow)', fontSize:13 }}>{s.points || 0}</td>
-                            <td>
-                              {s.status === 'pending' ? (
+                        {dbmsSubmissions.map((s: any) => {
+                          const qObj = dbmsQuestions.find(q => q.id === s.questionId);
+                          const qTitle = qObj?.title || s.questionTitle || 'DBMS Question';
+                          const qTopic = qObj?.topic || s.topic || 'SQL';
+                          const qDiff = qObj?.difficulty || s.difficulty || 'easy';
+
+                          return (
+                            <tr key={s.id} style={{ borderBottom:'1px solid rgba(255,255,255,0.04)', background: s.status==='pending'?'rgba(245,158,11,0.03)':undefined }}>
+                              <td>
+                                <div style={{ fontWeight:600, fontSize:13 }}>{s.userName}</div>
+                                <div style={{ fontSize:10, color:'var(--text-3)' }}>{s.userEmail}</div>
+                              </td>
+                              <td style={{ maxWidth:200 }}>
+                                <div style={{ fontWeight:600, fontSize:13, color:'var(--text-1)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={qTitle}>
+                                  {qTitle}
+                                </div>
+                                <div className="flex items-center gap-1" style={{ marginTop:2 }}>
+                                  <span style={{ fontSize:10, color:'var(--cyan)', background:'rgba(34,211,238,0.08)', padding:'1px 6px', borderRadius:4 }}>{qTopic}</span>
+                                  {qObj?.tableData && qObj.tableData.length > 0 && (
+                                    <span style={{ fontSize:9, color:'var(--text-3)' }}>({qObj.tableData.length} tbl)</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <span className={`badge ${qDiff==='easy'?'diff-easy':qDiff==='medium'?'diff-medium':'diff-hard'}`}>{qDiff}</span>
+                              </td>
+                              <td style={{ maxWidth:240 }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => openDbmsInspector(s)}
+                                    style={{ fontSize:11, padding:'4px 8px', color:'var(--cyan)', border:'1px solid rgba(34,211,238,0.25)', display:'flex', alignItems:'center', gap:4 }}
+                                    title="Open interactive SQLite test bench">
+                                    <Play size={10} /> Test in SQLite
+                                  </button>
+                                  <details style={{ cursor:'pointer' }}>
+                                    <summary style={{ fontSize:10, color:'var(--text-3)', cursor:'pointer' }}>Code</summary>
+                                    <pre style={{ fontSize:11, fontFamily:'JetBrains Mono,monospace', color:'var(--text-1)', background:'rgba(0,0,0,0.5)', padding:'8px 10px', borderRadius:6, marginTop:4, maxHeight:110, overflow:'auto', whiteSpace:'pre-wrap', border:'1px solid rgba(34,211,238,0.12)' }}>
+                                      {s.userQuery || s.userOutput || '(no query)'}
+                                    </pre>
+                                  </details>
+                                </div>
+                              </td>
+                              <td>
+                                <span style={{ fontWeight:700, fontSize:11,
+                                  padding:'3px 8px', borderRadius:6,
+                                  background: s.status==='pass'?'rgba(16,185,129,0.1)':s.status==='fail'?'rgba(239,68,68,0.1)':'rgba(245,158,11,0.1)',
+                                  color: s.status==='pass'?'var(--green)':s.status==='fail'?'var(--red)':'var(--yellow)',
+                                  border: `1px solid ${s.status==='pass'?'rgba(16,185,129,0.3)':s.status==='fail'?'rgba(239,68,68,0.3)':'rgba(245,158,11,0.3)'}` }}>
+                                  {s.status==='pass' ? '✅ Pass' : s.status==='fail' ? '❌ Fail' : '⏳ Pending'}
+                                </span>
+                              </td>
+                              <td style={{ fontWeight:700, color:'var(--yellow)', fontSize:13 }}>{s.points || 0}</td>
+                              <td style={{ maxWidth:220 }}>
+                                {editingRemarksSubId === s.id ? (
+                                  <div style={{ display:'flex', gap:4, alignItems:'center' }}>
+                                    <input
+                                      className="input"
+                                      style={{ fontSize:11, padding:'3px 8px' }}
+                                      value={inlineRemarksDraft}
+                                      placeholder="Add remarks..."
+                                      onChange={e => setInlineRemarksDraft(e.target.value)}
+                                    />
+                                    <button
+                                      className="btn btn-sm"
+                                      style={{ background:'var(--cyan)', color:'#000', padding:'2px 6px', fontSize:10 }}
+                                      onClick={() => saveAdminRemarksOnly(s.id, inlineRemarksDraft)}>
+                                      Save
+                                    </button>
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      style={{ padding:'2px 5px', fontSize:10 }}
+                                      onClick={() => setEditingRemarksSubId(null)}>
+                                      <X size={10} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                                    {s.adminRemarks ? (
+                                      <span style={{ fontSize:11, color:'var(--text-2)', fontStyle:'italic', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:170 }} title={s.adminRemarks}>
+                                        💬 "{s.adminRemarks}"
+                                      </span>
+                                    ) : (
+                                      <span style={{ fontSize:11, color:'var(--text-3)' }}>No remarks</span>
+                                    )}
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      style={{ padding:'2px 4px', color:'var(--text-3)' }}
+                                      title="Edit remarks"
+                                      onClick={() => {
+                                        setEditingRemarksSubId(s.id);
+                                        setInlineRemarksDraft(s.adminRemarks || '');
+                                      }}>
+                                      <Edit3 size={10} />
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                              <td>
                                 <div style={{ display:'flex', gap:4 }}>
                                   <button
                                     className="btn btn-sm"
-                                    disabled={gradingId === s.id}
-                                    style={{ background:'rgba(16,185,129,0.15)', color:'var(--green)', border:'1px solid rgba(16,185,129,0.3)', padding:'4px 8px' }}
-                                    onClick={() => gradeDbmsSubmission(s, 'pass')}
-                                    title="Mark as Pass">
-                                    {gradingId===s.id ? <Loader2 size={10} style={{animation:'spin-slow 0.8s linear infinite'}}/> : <ThumbsUp size={11}/>} Pass
+                                    onClick={() => openDbmsInspector(s)}
+                                    style={{ background:'rgba(34,211,238,0.12)', color:'var(--cyan)', border:'1px solid rgba(34,211,238,0.3)', padding:'4px 8px', fontSize:11 }}
+                                    title="Open live test bench & grade">
+                                    <Terminal size={11} /> Test & Grade
                                   </button>
-                                  <button
-                                    className="btn btn-sm"
-                                    disabled={gradingId === s.id}
-                                    style={{ background:'rgba(239,68,68,0.12)', color:'var(--red)', border:'1px solid rgba(239,68,68,0.28)', padding:'4px 8px' }}
-                                    onClick={() => gradeDbmsSubmission(s, 'fail')}
-                                    title="Mark as Fail">
-                                    {gradingId===s.id ? <Loader2 size={10} style={{animation:'spin-slow 0.8s linear infinite'}}/> : <ThumbsDown size={11}/>} Fail
-                                  </button>
+                                  {s.status === 'pending' && (
+                                    <>
+                                      <button
+                                        className="btn btn-sm"
+                                        disabled={gradingId === s.id}
+                                        style={{ background:'rgba(16,185,129,0.15)', color:'var(--green)', border:'1px solid rgba(16,185,129,0.3)', padding:'4px 7px' }}
+                                        onClick={() => gradeDbmsSubmission(s, 'pass')}
+                                        title="Quick Pass">
+                                        {gradingId===s.id ? <Loader2 size={10} style={{animation:'spin-slow 0.8s linear infinite'}}/> : <ThumbsUp size={11}/>}
+                                      </button>
+                                      <button
+                                        className="btn btn-sm"
+                                        disabled={gradingId === s.id}
+                                        style={{ background:'rgba(239,68,68,0.12)', color:'var(--red)', border:'1px solid rgba(239,68,68,0.28)', padding:'4px 7px' }}
+                                        onClick={() => gradeDbmsSubmission(s, 'fail')}
+                                        title="Quick Fail">
+                                        {gradingId===s.id ? <Loader2 size={10} style={{animation:'spin-slow 0.8s linear infinite'}}/> : <ThumbsDown size={11}/>}
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
-                              ) : (
-                                <span style={{ fontSize:10, color:'var(--text-3)' }}>Graded</span>
-                              )}
-                            </td>
-                            <td>
-                              <button className="btn btn-danger btn-sm" disabled={deletingSubId === s.id} onClick={() => deleteDbmsSubmission(s.id)}>
-                                <Trash2 size={11}/>
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                              <td>
+                                <button className="btn btn-danger btn-sm" disabled={deletingSubId === s.id} onClick={() => deleteDbmsSubmission(s.id)}>
+                                  <Trash2 size={11}/>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
                 )}
               </div>
+
+              {/* ── Admin Live DBMS Inspector & Evaluation Modal ── */}
+              {inspectingSub && (() => {
+                const sub = inspectingSub;
+                const q = dbmsQuestions.find(x => x.id === sub.questionId);
+                const qTitle = q?.title || sub.questionTitle || 'DBMS Question';
+                const qTopic = q?.topic || sub.topic || 'SQL';
+                const qDiff = q?.difficulty || sub.difficulty || 'easy';
+                const pts = DBMS_POINTS[qDiff] ?? 10;
+
+                return (
+                  <div style={{
+                    position:'fixed', top:0, left:0, right:0, bottom:0,
+                    background:'rgba(3,7,18,0.85)', backdropFilter:'blur(8px)',
+                    zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:16
+                  }}>
+                    <div className="glass-card" style={{
+                      width:'100%', maxWidth:980, maxHeight:'92vh', overflowY:'auto',
+                      border:'1px solid rgba(34,211,238,0.3)', boxShadow:'0 20px 60px rgba(0,0,0,0.8)',
+                      padding:24, display:'flex', flexDirection:'column', gap:18
+                    }}>
+                      {/* Modal Header */}
+                      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', borderBottom:'1px solid var(--border)', paddingBottom:14 }}>
+                        <div>
+                          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4, flexWrap:'wrap' }}>
+                            <span style={{ fontSize:10, fontWeight:700, color:'var(--cyan)', background:'rgba(34,211,238,0.1)', padding:'2px 8px', borderRadius:4, border:'1px solid rgba(34,211,238,0.25)' }}>
+                              DBMS LAB INSPECTOR
+                            </span>
+                            <span className={`badge ${qDiff==='easy'?'diff-easy':qDiff==='medium'?'diff-medium':'diff-hard'}`}>{qDiff}</span>
+                            <span style={{ fontSize:11, color:'var(--text-3)' }}>📚 {qTopic}</span>
+                            <span style={{ fontSize:11, color:'var(--yellow)', fontWeight:700 }}>+{pts} pts</span>
+                          </div>
+                          <h2 style={{ fontSize:20, fontWeight:800, margin:0, color:'var(--text-1)' }}>{qTitle}</h2>
+                          <p style={{ fontSize:12, color:'var(--text-3)', margin:'3px 0 0' }}>
+                            Student: <strong style={{ color:'var(--text-1)' }}>{sub.userName}</strong> ({sub.userEmail}) · Submitted query evaluation
+                          </p>
+                        </div>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setInspectingSub(null)} style={{ padding:'6px 10px' }}>
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      {/* Question Description & Context */}
+                      {q?.description && (
+                        <div style={{ background:'rgba(34,211,238,0.04)', border:'1px solid rgba(34,211,238,0.15)', borderRadius:8, padding:'10px 14px', fontSize:12, color:'var(--text-2)', lineHeight:1.6 }}>
+                          <strong style={{ color:'var(--cyan)', display:'block', marginBottom:2 }}>Problem Prompt:</strong>
+                          {q.description}
+                        </div>
+                      )}
+
+                      {/* Sample Tables Preview */}
+                      {q?.tableData && q.tableData.length > 0 && (
+                        <div style={{ background:'rgba(0,0,0,0.25)', border:'1px solid var(--border)', borderRadius:8, padding:12 }}>
+                          <span style={{ fontSize:11, fontWeight:700, color:'var(--cyan)', display:'flex', alignItems:'center', gap:4, marginBottom:6 }}>
+                            <Table2 size={12} /> Test Database Tables Available: {q.tableData.map(t => t.name).filter(Boolean).join(', ')}
+                          </span>
+                          <div style={{ display:'flex', gap:10, overflowX:'auto' }}>
+                            {q.tableData.map((t, ti) => (
+                              <div key={ti} style={{ background:'rgba(34,211,238,0.06)', border:'1px solid rgba(34,211,238,0.16)', borderRadius:6, padding:'6px 10px', fontSize:11, minWidth:140 }}>
+                                <strong style={{ color:'var(--text-1)' }}>{t.name}</strong>
+                                <div style={{ fontSize:10, color:'var(--text-3)', fontFamily:'monospace' }}>{t.columns}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Side-by-Side: Student Query vs Reference Expected Query */}
+                      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(420px, 1fr))', gap:16 }}>
+                        {/* Student Query Box */}
+                        <div style={{ background:'rgba(0,0,0,0.4)', border:'1px solid rgba(34,211,238,0.2)', borderRadius:10, padding:14, display:'flex', flexDirection:'column', gap:10 }}>
+                          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                            <span style={{ fontSize:12, fontWeight:700, color:'var(--cyan)', display:'flex', alignItems:'center', gap:5 }}>
+                              <Code2 size={13} /> Student's Submitted Query
+                            </span>
+                            <button
+                              className="btn btn-sm"
+                              disabled={runningStudentSql}
+                              onClick={() => runStudentSqlInModal(sub)}
+                              style={{ background:'linear-gradient(135deg,var(--cyan),#0891b2)', color:'#000', fontWeight:700, fontSize:11, padding:'4px 10px', display:'flex', alignItems:'center', gap:4 }}>
+                              {runningStudentSql ? <Loader2 size={11} style={{ animation:'spin-slow 0.8s linear infinite' }} /> : <Play size={11} />}
+                              Run in SQLite
+                            </button>
+                          </div>
+                          <pre style={{
+                            fontSize:12, fontFamily:'JetBrains Mono,monospace', background:'rgba(0,0,0,0.6)',
+                            padding:10, borderRadius:6, color:'var(--text-1)', maxHeight:130, overflow:'auto',
+                            margin:0, border:'1px solid rgba(255,255,255,0.06)', whiteSpace:'pre-wrap'
+                          }}>
+                            {sub.userQuery || sub.userOutput || '(no query provided)'}
+                          </pre>
+
+                          {/* Student Query SQLite Output */}
+                          {studentQueryResult && (
+                            <div style={{ marginTop:4, borderTop:'1px solid rgba(34,211,238,0.15)', paddingTop:8 }}>
+                              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+                                <span style={{ fontSize:11, fontWeight:700, color: studentQueryResult.success ? 'var(--green)' : 'var(--red)' }}>
+                                  {studentQueryResult.success ? `✓ Output (${studentQueryResult.executionTimeMs}ms, ${studentQueryResult.values.length} rows)` : '✕ SQLite Error'}
+                                </span>
+                              </div>
+                              {studentQueryResult.success ? (
+                                studentQueryResult.columns.length === 0 ? (
+                                  <div style={{ fontSize:11, color:'var(--text-3)' }}>Query returned 0 rows / no columns.</div>
+                                ) : (
+                                  <div style={{ maxHeight:160, overflow:'auto', border:'1px solid rgba(255,255,255,0.06)', borderRadius:6 }}>
+                                    <table style={{ width:'100%', fontSize:11, fontFamily:'JetBrains Mono,monospace', borderCollapse:'collapse' }}>
+                                      <thead>
+                                        <tr style={{ background:'rgba(34,211,238,0.15)' }}>
+                                          {studentQueryResult.columns.map((c, ci) => (
+                                            <th key={ci} style={{ padding:'4px 8px', textAlign:'left', color:'var(--cyan)', borderBottom:'1px solid rgba(34,211,238,0.2)' }}>{c}</th>
+                                          ))}
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {studentQueryResult.values.map((row, ri) => (
+                                          <tr key={ri} style={{ borderBottom:'1px solid rgba(255,255,255,0.03)' }}>
+                                            {row.map((cell, ci) => (
+                                              <td key={ci} style={{ padding:'3px 8px', color:'var(--text-2)' }}>{String(cell ?? 'NULL')}</td>
+                                            ))}
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )
+                              ) : (
+                                <pre style={{ color:'var(--red)', fontSize:11, fontFamily:'monospace', margin:0, whiteSpace:'pre-wrap' }}>
+                                  {studentQueryResult.error}
+                                </pre>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Reference / Expected Solution (How it was done) */}
+                        <div style={{ background:'rgba(0,0,0,0.4)', border:'1px solid rgba(139,92,246,0.25)', borderRadius:10, padding:14, display:'flex', flexDirection:'column', gap:10 }}>
+                          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                            <span style={{ fontSize:12, fontWeight:700, color:'var(--purple-light)', display:'flex', alignItems:'center', gap:5 }}>
+                              <BookOpen size={13} /> Reference Solution (How it is done)
+                            </span>
+                            {q?.expectedQuery && (
+                              <button
+                                className="btn btn-sm"
+                                disabled={runningExpectedSql}
+                                onClick={() => runExpectedSqlInModal(sub)}
+                                style={{ background:'rgba(139,92,246,0.2)', color:'var(--purple-light)', border:'1px solid rgba(139,92,246,0.4)', fontWeight:600, fontSize:11, padding:'4px 10px', display:'flex', alignItems:'center', gap:4 }}>
+                                {runningExpectedSql ? <Loader2 size={11} style={{ animation:'spin-slow 0.8s linear infinite' }} /> : <Play size={11} />}
+                                Run Reference
+                              </button>
+                            )}
+                          </div>
+
+                          <pre style={{
+                            fontSize:12, fontFamily:'JetBrains Mono,monospace', background:'rgba(0,0,0,0.6)',
+                            padding:10, borderRadius:6, color:'var(--text-1)', maxHeight:130, overflow:'auto',
+                            margin:0, border:'1px solid rgba(139,92,246,0.15)', whiteSpace:'pre-wrap'
+                          }}>
+                            {q?.expectedQuery || '(No reference expected query configured for this problem)'}
+                          </pre>
+
+                          {q?.explanation && (
+                            <div style={{ fontSize:11, color:'var(--text-2)', background:'rgba(139,92,246,0.06)', padding:'6px 10px', borderRadius:6, lineHeight:1.5 }}>
+                              <strong style={{ color:'var(--purple-light)' }}>Explanation:</strong> {q.explanation}
+                            </div>
+                          )}
+
+                          {/* Reference Query SQLite Output */}
+                          {expectedQueryResult && (
+                            <div style={{ marginTop:4, borderTop:'1px solid rgba(139,92,246,0.15)', paddingTop:8 }}>
+                              <span style={{ fontSize:11, fontWeight:700, color: expectedQueryResult.success ? 'var(--green)' : 'var(--red)', display:'block', marginBottom:4 }}>
+                                {expectedQueryResult.success ? `✓ Reference Output (${expectedQueryResult.executionTimeMs}ms, ${expectedQueryResult.values.length} rows)` : '✕ Error'}
+                              </span>
+                              {expectedQueryResult.success && expectedQueryResult.columns.length > 0 && (
+                                <div style={{ maxHeight:140, overflow:'auto', border:'1px solid rgba(255,255,255,0.06)', borderRadius:6 }}>
+                                  <table style={{ width:'100%', fontSize:11, fontFamily:'JetBrains Mono,monospace', borderCollapse:'collapse' }}>
+                                    <thead>
+                                      <tr style={{ background:'rgba(139,92,246,0.15)' }}>
+                                        {expectedQueryResult.columns.map((c, ci) => (
+                                          <th key={ci} style={{ padding:'4px 8px', textAlign:'left', color:'var(--purple-light)', borderBottom:'1px solid rgba(139,92,246,0.2)' }}>{c}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {expectedQueryResult.values.map((row, ri) => (
+                                        <tr key={ri} style={{ borderBottom:'1px solid rgba(255,255,255,0.03)' }}>
+                                          {row.map((cell, ci) => (
+                                            <td key={ci} style={{ padding:'3px 8px', color:'var(--text-2)' }}>{String(cell ?? 'NULL')}</td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Faculty Remarks Input */}
+                      <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid var(--border)', borderRadius:10, padding:14 }}>
+                        <label style={{ fontSize:12, fontWeight:700, color:'var(--yellow)', display:'flex', alignItems:'center', gap:6, marginBottom:6 }}>
+                          <MessageSquare size={13} /> Faculty Remarks & Feedback for Student:
+                        </label>
+                        <p style={{ fontSize:11, color:'var(--text-3)', margin:'0 0 8px' }}>
+                          These remarks will be visible to <strong>{sub.userName}</strong> in their SQL Lab page and Submission History so they can learn or revise.
+                        </p>
+                        <textarea
+                          className="input"
+                          rows={3}
+                          style={{ fontSize:12, fontFamily:'Plus Jakarta Sans, sans-serif' }}
+                          placeholder="e.g. Excellent query structure! Or: Your query failed to filter active employees, please check WHERE condition."
+                          value={adminRemarksDraft}
+                          onChange={e => setAdminRemarksDraft(e.target.value)}
+                        />
+                        {/* Quick preset remarks */}
+                        <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginTop:8 }}>
+                          {[
+                            'Well done! Accurate and optimized SQL query.',
+                            'Needs Revision: Incorrect WHERE clause condition.',
+                            'Needs Revision: Missing required column aliases or ordering.',
+                            'Syntax Error in SQL statement. Please test before submitting.',
+                          ].map((remark, ri) => (
+                            <button
+                              key={ri}
+                              className="btn btn-ghost btn-sm"
+                              style={{ fontSize:10, padding:'2px 8px', color:'var(--text-3)', border:'1px solid rgba(255,255,255,0.08)' }}
+                              onClick={() => setAdminRemarksDraft(remark)}>
+                              + "{remark.slice(0, 32)}..."
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Evaluation Decision Buttons */}
+                      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap', borderTop:'1px solid var(--border)', paddingTop:16 }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <button
+                            className="btn"
+                            disabled={gradingId === sub.id}
+                            onClick={() => gradeDbmsSubmission(sub, 'pass', adminRemarksDraft)}
+                            style={{ background:'linear-gradient(135deg,var(--green),#059669)', color:'#fff', fontWeight:700, padding:'8px 18px', display:'flex', alignItems:'center', gap:6, boxShadow:'0 4px 16px rgba(16,185,129,0.3)' }}>
+                            {gradingId === sub.id ? <Loader2 size={13} style={{ animation:'spin-slow 0.8s linear infinite' }} /> : <ThumbsUp size={13} />}
+                            Grade as PASS (+{pts} pts)
+                          </button>
+                          <button
+                            className="btn"
+                            disabled={gradingId === sub.id}
+                            onClick={() => gradeDbmsSubmission(sub, 'fail', adminRemarksDraft)}
+                            style={{ background:'linear-gradient(135deg,var(--red),#dc2626)', color:'#fff', fontWeight:700, padding:'8px 18px', display:'flex', alignItems:'center', gap:6, boxShadow:'0 4px 16px rgba(239,68,68,0.3)' }}>
+                            {gradingId === sub.id ? <Loader2 size={13} style={{ animation:'spin-slow 0.8s linear infinite' }} /> : <ThumbsDown size={13} />}
+                            Grade as FAIL / Needs Revision
+                          </button>
+                          <button
+                            className="btn btn-ghost"
+                            disabled={savingRemarksId === sub.id}
+                            onClick={() => saveAdminRemarksOnly(sub.id, adminRemarksDraft)}
+                            style={{ padding:'8px 16px', display:'flex', alignItems:'center', gap:6 }}>
+                            {savingRemarksId === sub.id ? <Loader2 size={13} style={{ animation:'spin-slow 0.8s linear infinite' }} /> : <Save size={13} />}
+                            Save Remarks Only
+                          </button>
+                        </div>
+                        <button className="btn btn-ghost" onClick={() => setInspectingSub(null)}>
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Code Submissions */}
               <div className="glass-card" style={{ overflow:'hidden', padding:0 }}>
@@ -1264,7 +1730,7 @@ const AdminPage: React.FC = () => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                     <Award size={16} color="var(--yellow)" /><span style={{ fontWeight: 700, fontSize: 14 }}>Top Performers</span>
                   </div>
-                  {users.filter(u => u.role !== 'superadmin').sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map((u, i) => (
+                  {users.slice().sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map((u, i) => (
                     <div key={u.id} className="flex items-center gap-3" style={{ marginBottom: 11 }}>
                       <div style={{ width: 24, height: 24, borderRadius: 99, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800,
                         background: i === 0 ? 'rgba(245,158,11,0.2)' : i === 1 ? 'rgba(148,163,184,0.12)' : 'rgba(180,83,9,0.12)',
@@ -1274,13 +1740,15 @@ const AdminPage: React.FC = () => {
                       </div>
                       <div className="avatar" style={{ width: 26, height: 26, fontSize: 10, flexShrink: 0 }}>{u.displayName?.[0]?.toUpperCase() || 'U'}</div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.displayName}</div>
+                        <div style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {u.displayName} {u.role === 'superadmin' ? '👑' : u.role === 'admin' ? '🛡️' : ''}
+                        </div>
                         <div style={{ fontSize: 10, color: 'var(--text-3)' }}>{u.problemsSolved || 0} solved</div>
                       </div>
                       <div style={{ color: 'var(--yellow)', fontWeight: 700, fontSize: 12 }}>{u.score || 0} pts</div>
                     </div>
                   ))}
-                  {users.filter(u => u.role !== 'superadmin').length === 0 && <p style={{ color: 'var(--text-3)', fontSize: 12 }}>No students yet.</p>}
+                  {users.length === 0 && <p style={{ color: 'var(--text-3)', fontSize: 12 }}>No competitors yet.</p>}
                 </div>
 
                 {/* Content breakdown */}
