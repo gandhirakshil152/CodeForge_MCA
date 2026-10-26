@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 import SplashPage from './pages/SplashPage';
@@ -94,6 +95,7 @@ const App: React.FC = () => (
           },
         }}
       />
+      <SpeedInsights />
     </BrowserRouter>
   </AuthProvider>
 );
