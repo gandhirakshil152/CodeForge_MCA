@@ -65,11 +65,8 @@ const HistoryPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
-  const [problemFilter, setProblemFilter] = useState('all');
   const [userFilter, setUserFilter] = useState('all');
-  const [viewMode, setViewMode] = useState<'timeline' | 'by-problem' | 'by-student'>('timeline');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
   const [showCode, setShowCode] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [allUsers, setAllUsers] = useState<{ uid: string; displayName: string; email: string }[]>([]);
@@ -119,53 +116,11 @@ const HistoryPage: React.FC = () => {
 
   useEffect(() => { load(); }, [user, isAdmin]);
 
-  // Extract distinct problems/questions for problem-wise filter
-  const distinctProblems = useMemo(() => {
-    const map = new Map<string, { id: string; title: string; source: 'coding' | 'dbms'; count: number }>();
-    submissions.forEach(s => {
-      const pId = s.problemId || s.questionId || s.problemTitle || s.questionTitle || 'unknown';
-      const title = s.problemTitle || s.questionTitle || s.problemId || s.questionId || 'Untitled Problem';
-      if (!map.has(pId)) {
-        map.set(pId, { id: pId, title, source: s.source, count: 0 });
-      }
-      map.get(pId)!.count += 1;
-    });
-    return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
-  }, [submissions]);
-
-  // Extract distinct students for student-wise filter and counts
-  const studentStatsMap = useMemo(() => {
-    const map = new Map<string, {
-      uid: string;
-      name: string;
-      email: string;
-      count: number;
-      accepted: number;
-      penalties: number;
-      totalScore: number;
-    }>();
-    submissions.forEach(s => {
-      const uId = s.userId || 'unknown';
-      const name = s.userName || 'Student';
-      const email = s.userEmail || '';
-      if (!map.has(uId)) {
-        map.set(uId, { uid: uId, name, email, count: 0, accepted: 0, penalties: 0, totalScore: 0 });
-      }
-      const st = map.get(uId)!;
-      st.count += 1;
-      if (s.status === 'accepted' || s.status === 'pass') st.accepted += 1;
-      if ((s.penalty || 0) < 0 || !!s.penaltyReason) st.penalties += 1;
-      st.totalScore += (s.score ?? s.points ?? 0);
-    });
-    return map;
-  }, [submissions]);
-
   const filtered = useMemo(() => {
     return submissions.filter(s => {
       const title = s.problemTitle || s.questionTitle || s.problemId || s.questionId || '';
       const name = s.userName || '';
       const email = s.userEmail || '';
-      const pId = s.problemId || s.questionId || s.problemTitle || s.questionTitle || '';
       const matchSearch = !search || title.toLowerCase().includes(search.toLowerCase()) ||
         name.toLowerCase().includes(search.toLowerCase()) ||
         email.toLowerCase().includes(search.toLowerCase()) ||
@@ -174,90 +129,9 @@ const HistoryPage: React.FC = () => {
         (statusFilter === 'penalized' && ((s.penalty || 0) < 0 || !!s.penaltyReason));
       const matchSource = sourceFilter === 'all' || s.source === sourceFilter;
       const matchUser = userFilter === 'all' || s.userId === userFilter;
-      const matchProblem = problemFilter === 'all' || pId === problemFilter;
-      return matchSearch && matchStatus && matchSource && matchUser && matchProblem;
+      return matchSearch && matchStatus && matchSource && matchUser;
     });
-  }, [submissions, search, statusFilter, sourceFilter, userFilter, problemFilter]);
-
-  // Problem-wise grouping of filtered submissions
-  const groupedByProblem = useMemo(() => {
-    const map = new Map<string, {
-      problemId: string;
-      title: string;
-      source: 'coding' | 'dbms';
-      submissions: Submission[];
-      accepted: number;
-      penalties: number;
-      uniqueStudents: Set<string>;
-    }>();
-
-    filtered.forEach(s => {
-      const pId = s.problemId || s.questionId || s.problemTitle || s.questionTitle || 'unknown';
-      const title = s.problemTitle || s.questionTitle || s.problemId || s.questionId || 'Untitled Problem';
-      if (!map.has(pId)) {
-        map.set(pId, {
-          problemId: pId,
-          title,
-          source: s.source,
-          submissions: [],
-          accepted: 0,
-          penalties: 0,
-          uniqueStudents: new Set<string>(),
-        });
-      }
-      const g = map.get(pId)!;
-      g.submissions.push(s);
-      if (s.status === 'accepted' || s.status === 'pass') g.accepted += 1;
-      if ((s.penalty || 0) < 0 || !!s.penaltyReason) g.penalties += 1;
-      if (s.userId) g.uniqueStudents.add(s.userId);
-    });
-
-    return Array.from(map.values()).sort((a, b) => b.submissions.length - a.submissions.length);
-  }, [filtered]);
-
-  // Student-wise grouping of filtered submissions
-  const groupedByStudent = useMemo(() => {
-    const map = new Map<string, {
-      userId: string;
-      userName: string;
-      userEmail: string;
-      submissions: Submission[];
-      accepted: number;
-      wrong: number;
-      penalties: number;
-      totalScore: number;
-      uniqueProblems: Set<string>;
-    }>();
-
-    filtered.forEach(s => {
-      const uId = s.userId || 'anonymous';
-      const name = s.userName || 'Anonymous Student';
-      const email = s.userEmail || '';
-      if (!map.has(uId)) {
-        map.set(uId, {
-          userId: uId,
-          userName: name,
-          userEmail: email,
-          submissions: [],
-          accepted: 0,
-          wrong: 0,
-          penalties: 0,
-          totalScore: 0,
-          uniqueProblems: new Set<string>(),
-        });
-      }
-      const g = map.get(uId)!;
-      g.submissions.push(s);
-      if (s.status === 'accepted' || s.status === 'pass') g.accepted += 1;
-      if (s.status === 'wrong_answer' || s.status === 'fail') g.wrong += 1;
-      if ((s.penalty || 0) < 0 || !!s.penaltyReason) g.penalties += 1;
-      g.totalScore += (s.score ?? s.points ?? 0);
-      const pId = s.problemId || s.questionId || s.problemTitle || s.questionTitle;
-      if (pId) g.uniqueProblems.add(pId);
-    });
-
-    return Array.from(map.values()).sort((a, b) => b.submissions.length - a.submissions.length);
-  }, [filtered]);
+  }, [submissions, search, statusFilter, sourceFilter, userFilter]);
 
   const stats = useMemo(() => ({
     total: filtered.length,
