@@ -16,6 +16,7 @@ import Navbar from '../components/Navbar';
 import {
   type LangId, LANG_OPTIONS, MONACO_LANG, type RunResult, runJudge0Code, validateCodeRestrictions,
 } from '../utils/judgeRunner';
+import { registerBasicSuggestions } from '../utils/editorSuggestions';
 
 interface QuestionItem {
   id: string;
@@ -817,13 +818,16 @@ const TestPage: React.FC = () => {
 
                 {/* Monaco Code Editor */}
                 <div style={{
-                  height: 380, borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+                  height: 480, minHeight: 440, borderRadius: 'var(--radius-lg)', overflow: 'hidden',
                   border: '1px solid var(--border)', boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
                 }}>
                   <Editor
                     theme="vs-dark"
                     language={MONACO_LANG[currentLang[q.id] || 'java']}
                     value={codingCodes[q.id]?.code || (q.starterCode?.[currentLang[q.id] || 'java'] || DEFAULT_STARTER[currentLang[q.id] || 'java'])}
+                    onMount={(_editor, monaco) => {
+                      try { registerBasicSuggestions(monaco); } catch {}
+                    }}
                     onChange={val => setCodingCodes(p => ({
                       ...p,
                       [q.id]: {
@@ -838,6 +842,15 @@ const TestPage: React.FC = () => {
                       minimap: { enabled: false },
                       scrollBeyondLastLine: false,
                       fontFamily: 'JetBrains Mono, monospace',
+                      padding: { top: 14, bottom: 20 },
+                      wordWrap: 'on',
+                      automaticLayout: true,
+                      scrollbar: {
+                        vertical: 'visible',
+                        horizontal: 'visible',
+                        verticalScrollbarSize: 10,
+                        horizontalScrollbarSize: 10,
+                      },
                     }}
                   />
                 </div>

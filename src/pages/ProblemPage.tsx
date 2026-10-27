@@ -10,12 +10,13 @@ import Editor from '@monaco-editor/react';
 import {
   Play, Send, ThumbsUp, ThumbsDown, MessageCircle, Clock,
   Loader2, CheckCircle2, XCircle, Terminal, BookOpen, Trophy, RotateCcw, ShieldAlert,
-  Code2, Eye, Copy, Check,
+  Code2, Eye, Copy, Check, Sparkles, Maximize2, Minimize2, X, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Navbar from '../components/Navbar';
 import type { Problem } from './ProblemsPage';
 import { validateCodeRestrictions } from '../utils/codeValidator';
+import { registerBasicSuggestions, LANGUAGE_QUICK_METHODS } from '../utils/editorSuggestions';
 
 // ── Language options ──────────────────────────────────────────────
 type LangId = 'java' | 'c' | 'python' | 'javascript';
@@ -388,7 +389,7 @@ const LangGuide: React.FC<{ lang: LangId }> = ({ lang }) => {
 // ── Component ─────────────────────────────────────────────────────
 const ProblemPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { user, profile } = useAuth();
+  const { user, profile, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -423,6 +424,41 @@ const ProblemPage: React.FC = () => {
   const [postingComment, setPostingComment] = useState(false);
   const [problemLiked, setProblemLiked] = useState(false);
   const [problemDisliked, setProblemDisliked] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isEditorExpanded, setIsEditorExpanded] = useState(false);
+  const [isOutputMinimized, setIsOutputMinimized] = useState(false);
+
+  const insertMethodSnippet = (snippet: string) => {
+    const cleanSnippet = snippet.replace(/\$\{\d+:?([^}]*)\}/g, '$1');
+    if (editorRef.current) {
+      const editor = editorRef.current;
+      const selection = editor.getSelection();
+      if (selection) {
+        editor.executeEdits('student-suggestion', [{
+          range: selection,
+          text: cleanSnippet,
+          forceMoveMarkers: true,
+        }]);
+      } else {
+        const position = editor.getPosition() || { lineNumber: 1, column: 1 };
+        editor.executeEdits('student-suggestion', [{
+          range: {
+            startLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column,
+          },
+          text: cleanSnippet,
+          forceMoveMarkers: true,
+        }]);
+      }
+      editor.focus();
+      toast.success('Inserted syntax snippet!', { duration: 1500 });
+    } else {
+      setCode(c => c + '\n' + cleanSnippet);
+      toast.success('Inserted snippet!', { duration: 1500 });
+    }
+  };
 
   // Load problem from Firestore
   useEffect(() => {
@@ -557,24 +593,55 @@ const ProblemPage: React.FC = () => {
 
       // ── Runtime-efficiency tiered scoring ─────────────────────
       const baseScore = result.status === 'accepted'
-        ? result.runtime < 100  ? 150   // blazing fast
-        : result.runtime < 300  ? 125   // fast
-        : result.runtime < 500  ? 100   // decent
-        : result.runtime < 1000 ? 75    // slow
-        :                         50    // very slow
+        ? result.runtime < 100  ? 150
+        : result.runtime < 300  ? 125
+        : result.runtime < 500  ? 100
+        : result.runtime < 1000 ? 75
+        :                         50
         : 0;
+
+      // ── Anti-Plagiarism Check ──────────────────────────────
+      // SuperAdmin is exempt. Check if this exact code was already submitted by a DIFFERENT user.
+      let penaltyApplied = 0;
+      let penaltyReason = '';
+      if (!isSuperAdmin) {
+        try {
+          const duplicateCheck = await getDocs(query(
+            collection(db, 'submissions'),
+            where('problemId', '==', id),
+            where('code', '==', code),
+          ));
+          // Look for submissions by other users
+          const byOtherUser = duplicateCheck.docs.find(d => d.data().userId !== user.uid);
+          if (byOtherUser) {
+            // Plagiarism detected! Deduct points — can make score negative!
+            // Penalty is -2x baseScore (or -100 minimum) so final score is strictly negative
+            const deduction = Math.max(baseScore * 2, 100);
+            penaltyApplied = -deduction;
+            penaltyReason = `Code matches submission by ${byOtherUser.data().userName || 'another student'}. Academic integrity violation.`;
+            toast.error(`🚨 Plagiarism Detected! Code copied from another student. ${penaltyApplied} pts penalty applied!`, { duration: 7000 });
+          }
+        } catch (e) {
+          console.warn('Plagiarism check error:', e);
+        }
+      }
+
+      const finalScore = baseScore + penaltyApplied;
 
       const todayDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD for dashboard daily queries
       const docRef = await addDoc(collection(db, 'submissions'), {
         userId: user.uid,
         userName: profile.displayName,
+        userEmail: user.email,
         problemId: id,
         problemTitle: problem.title,
         language: lang,
         code,
         status: result.status,
         runtime: result.runtime,
-        score: baseScore,
+        score: finalScore,
+        penalty: penaltyApplied,
+        penaltyReason: penaltyReason || null,
         todayDate,  // ← required for Dashboard daily task progress tracking
         createdAt: serverTimestamp(),
       });
@@ -583,7 +650,7 @@ const ProblemPage: React.FC = () => {
         id: docRef.id,
         status: result.status,
         runtime: result.runtime,
-        score: baseScore,
+        score: finalScore,
         code,
         language: lang,
       });
@@ -625,13 +692,13 @@ const ProblemPage: React.FC = () => {
           streakBonus = Math.min(newStreak * 5, 100); // 5 pts/day streak, cap 100
         }
 
-        const totalScore = baseScore + streakBonus;
+        const totalScore = finalScore + streakBonus; // finalScore already has penalty applied
 
         if (isFirstSolve) {
           await updateDoc(doc(db, 'problems', id!), { solvedCount: increment(1) });
           await updateDoc(doc(db, 'users', user.uid), {
             problemsSolved: increment(1),
-            score: increment(totalScore),
+            score: increment(totalScore), // can be negative if plagiarism detected
             totalSubmissions: increment(1),
             currentStreak: newStreak,
             longestStreak: increment(0), // will update below
@@ -654,19 +721,42 @@ const ProblemPage: React.FC = () => {
             createdAt: serverTimestamp(),
           });
 
-          if (streakBonus > 0) {
+          if (penaltyApplied < 0) {
+            toast.error(`🚨 Plagiarism penalty! Final score: ${finalScore} pts (${penaltyApplied} pts deducted)`, { duration: 6000 });
+          } else if (streakBonus > 0) {
             toast.success(`🎉 Accepted! +${totalScore} pts (🔥 ${newStreak}-day streak +${streakBonus} bonus!)`);
           } else {
-            toast.success(`🎉 Accepted! +${baseScore} pts (${result.runtime < 100 ? '⚡ Blazing Fast!' : result.runtime < 500 ? '🚀 Fast!' : '✅ Solved!'})`);
+            toast.success(`🎉 Accepted! +${finalScore} pts (${result.runtime < 100 ? '⚡ Blazing Fast!' : result.runtime < 500 ? '🚀 Fast!' : '✅ Solved!'})`);
           }
         } else {
-          await updateDoc(doc(db, 'users', user.uid), { totalSubmissions: increment(1) });
-          toast.success('✅ Accepted again! (already counted for score)');
+          await updateDoc(doc(db, 'users', user.uid), {
+            totalSubmissions: increment(1),
+            ...(penaltyApplied < 0 ? { score: increment(penaltyApplied) } : {}),
+          });
+          if (penaltyApplied < 0) {
+            toast.error(`🚨 Plagiarism penalty! ${penaltyApplied} pts deducted from your total score.`);
+          } else {
+            toast.success('✅ Accepted again! (already counted for score)');
+          }
         }
       } else if (result.status === 'wrong_answer') {
-        await updateDoc(doc(db, 'users', user.uid), { totalSubmissions: increment(1) });
-        toast.error('Wrong Answer. Keep grinding! 💪');
+        await updateDoc(doc(db, 'users', user.uid), {
+          totalSubmissions: increment(1),
+          ...(penaltyApplied < 0 ? { score: increment(penaltyApplied) } : {}),
+        });
+        if (penaltyApplied < 0) {
+          toast.error(`🚨 Plagiarism penalty! ${penaltyApplied} pts deducted. Wrong Answer.`);
+        } else {
+          toast.error('Wrong Answer. Keep grinding! 💪');
+        }
       } else {
+        if (penaltyApplied < 0) {
+          await updateDoc(doc(db, 'users', user.uid), {
+            totalSubmissions: increment(1),
+            score: increment(penaltyApplied),
+          });
+          toast.error(`🚨 Plagiarism penalty! ${penaltyApplied} pts deducted.`);
+        }
         toast.error('Runtime/Compile Error. Debug your code!');
       }
       loadSubmissions();
@@ -730,6 +820,11 @@ const ProblemPage: React.FC = () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEditorMount = (editor: any, monaco: any) => {
     editorRef.current = editor;
+    try {
+      registerBasicSuggestions(monaco);
+    } catch (e) {
+      console.warn('Monaco suggestion error:', e);
+    }
     // Block paste inside Monaco at the editor API level too
     editor.addAction({
       id: 'no-paste',
@@ -755,7 +850,7 @@ const ProblemPage: React.FC = () => {
   return (
     <>
       <Navbar />
-      <div className="problem-layout" style={{ marginTop: 64 }}>
+      <div className={`problem-layout ${isEditorExpanded ? 'editor-expanded' : ''}`} style={{ marginTop: 64 }}>
         {/* ── Left: Description / Comments / Submissions ── */}
         <div className="problem-desc-panel">
           {/* Problem Header */}
@@ -979,21 +1074,47 @@ const ProblemPage: React.FC = () => {
                                     {isCopied ? <Check size={11} color="var(--green)" /> : <Copy size={11} />}
                                     {isCopied ? 'Copied' : 'Copy'}
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const sLang = (s.language || 'python').toLowerCase() as LangId;
-                                      if (LANG_OPTIONS.some(l => l.id === sLang)) {
-                                        switchLang(sLang);
-                                      }
-                                      setCode(s.code || '');
-                                      toast.success(`Loaded ${s.language.toUpperCase()} submission into editor!`);
-                                    }}
-                                    className="btn btn-ghost btn-sm"
-                                    style={{ fontSize: 10, padding: '2px 7px', gap: 3, color: 'var(--purple-light)' }}>
-                                    <RotateCcw size={11} />
-                                    Load into Editor
-                                  </button>
+                                  {isSuperAdmin ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const sLang = (s.language || 'python').toLowerCase() as LangId;
+                                          if (LANG_OPTIONS.some(l => l.id === sLang)) {
+                                            switchLang(sLang);
+                                          }
+                                          setCode(s.code || '');
+                                          toast.success(`👑 [SuperAdmin] Loaded ${s.language.toUpperCase()} submission into editor!`);
+                                        }}
+                                        className="btn btn-ghost btn-sm"
+                                        style={{ fontSize: 10, padding: '2px 7px', gap: 3, color: 'var(--yellow)', border: '1px solid rgba(245,158,11,0.3)' }}
+                                        title="SuperAdmin: Load into live editor">
+                                        <RotateCcw size={11} />
+                                        Load into Editor
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const sLang = (s.language || 'python').toLowerCase() as LangId;
+                                          if (LANG_OPTIONS.some(l => l.id === sLang)) {
+                                            switchLang(sLang);
+                                          }
+                                          setCode(s.code || '');
+                                          toast.success(`👑 [SuperAdmin] Executing solution in editor...`);
+                                          setTimeout(() => handleRun(), 200);
+                                        }}
+                                        className="btn btn-ghost btn-sm"
+                                        style={{ fontSize: 10, padding: '2px 7px', gap: 3, color: 'var(--green)', border: '1px solid rgba(16,185,129,0.3)' }}
+                                        title="SuperAdmin: Load and execute in editor">
+                                        <Play size={11} />
+                                        Run in Editor
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <span style={{ fontSize: 10, color: 'var(--text-3)', padding: '2px 6px', background: 'rgba(255,255,255,0.03)', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                                      🔒 Read-Only
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                               <pre style={{
@@ -1088,7 +1209,34 @@ const ProblemPage: React.FC = () => {
               ))}
             </div>
             {/* Actions */}
-            <div className="flex gap-2 items-center">
+            <div className="flex gap-2 items-center flex-wrap">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowSuggestions(v => !v)}
+                style={{
+                  color: showSuggestions ? 'var(--cyan)' : 'var(--text-3)',
+                  borderColor: showSuggestions ? 'rgba(34,211,238,0.4)' : undefined,
+                  background: showSuggestions ? 'rgba(34,211,238,0.08)' : 'transparent',
+                  gap: 4, padding: '4px 8px', fontSize: 11
+                }}
+                title="Toggle basic student syntax & common methods helper">
+                <Sparkles size={13} /> {showSuggestions ? 'Hide Syntax' : 'Syntax Hints'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setIsEditorExpanded(v => !v)}
+                style={{
+                  color: isEditorExpanded ? 'var(--blue-light)' : 'var(--text-3)',
+                  borderColor: isEditorExpanded ? 'rgba(59,130,246,0.4)' : undefined,
+                  background: isEditorExpanded ? 'rgba(59,130,246,0.08)' : 'transparent',
+                  gap: 4, padding: '4px 8px', fontSize: 11
+                }}
+                title={isEditorExpanded ? 'Restore Normal Width' : 'Expand Editor to 75% Screen Width'}>
+                {isEditorExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                {isEditorExpanded ? 'Contract' : 'Expand'}
+              </button>
               <button title="Reset to starter code" className="btn btn-ghost btn-sm" onClick={resetCode} style={{ padding: '4px 8px' }}>
                 <RotateCcw size={13} />
               </button>
@@ -1102,6 +1250,48 @@ const ProblemPage: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* ── Student Basic Syntax & Method Suggestions Drawer ── */}
+          {showSuggestions && (
+            <div style={{
+              background: 'rgba(7, 12, 26, 0.98)',
+              borderBottom: '1px solid rgba(56,189,248,0.3)',
+              padding: '10px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              fontSize: 12,
+              animation: 'fadeIn 0.15s ease',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--cyan)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Sparkles size={13} /> Basic {lang.toUpperCase()} Methods &amp; Syntax:
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  Click to insert at cursor
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 110, overflowY: 'auto' }}>
+                {(LANGUAGE_QUICK_METHODS[lang] || []).map((m, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => insertMethodSnippet(m.snippet)}
+                    className="btn btn-ghost btn-sm"
+                    style={{
+                      fontSize: 11, padding: '3px 8px', borderRadius: 6,
+                      background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(56,189,248,0.18)',
+                      fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-1)',
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                    }}
+                    title={`${m.detail} — Click to insert`}>
+                    <code style={{ color: 'var(--cyan)' }}>{m.label}</code>
+                    <span style={{ fontSize: 9, opacity: 0.7 }}>({m.category})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* ── Just Submitted Receipt Banner ── */}
           {justSubmittedReceipt && (
@@ -1190,7 +1380,7 @@ const ProblemPage: React.FC = () => {
           <LangGuide lang={lang} />
 
           {/* Monaco Editor */}
-          <div style={{ flex: 1, overflow: 'hidden' }}>
+          <div className="problem-editor-container" style={{ flex: 1, minHeight: 380, overflow: 'hidden' }}>
             <Editor
               height="100%"
               language={lang}
@@ -1203,7 +1393,7 @@ const ProblemPage: React.FC = () => {
                 fontFamily: 'JetBrains Mono, monospace',
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
-                padding: { top: 16, bottom: 16 },
+                padding: { top: 16, bottom: 24 },
                 lineNumbers: 'on',
                 roundedSelection: true,
                 wordWrap: 'on',
@@ -1217,6 +1407,15 @@ const ProblemPage: React.FC = () => {
                 smoothScrolling: true,
                 cursorBlinking: 'smooth',
                 cursorSmoothCaretAnimation: 'on',
+                automaticLayout: true,
+                scrollbar: {
+                  vertical: 'visible',
+                  horizontal: 'visible',
+                  verticalScrollbarSize: 10,
+                  horizontalScrollbarSize: 10,
+                  useShadows: false,
+                  alwaysConsumeMouseWheel: false,
+                },
                 // Performance: disable expensive features
                 codeLens: false,
                 folding: true,
@@ -1227,8 +1426,15 @@ const ProblemPage: React.FC = () => {
 
           {/* Output Panel */}
           {runResult && (
-            <div style={{ padding: 16, borderTop: '1px solid var(--border)', background: 'rgba(5,5,15,0.9)', maxHeight: 320, overflowY: 'auto' }}>
-              <div className="flex items-center gap-2" style={{ marginBottom: 10 }}>
+            <div style={{
+              padding: isOutputMinimized ? '8px 16px' : 16,
+              borderTop: '1px solid var(--border)',
+              background: 'rgba(5,5,15,0.96)',
+              maxHeight: isOutputMinimized ? 44 : 320,
+              overflowY: isOutputMinimized ? 'hidden' : 'auto',
+              transition: 'all 0.2s ease',
+            }}>
+              <div className="flex items-center gap-2" style={{ marginBottom: isOutputMinimized ? 0 : 10 }}>
                 <Terminal size={14} color="var(--purple-light)" />
                 <span style={{ fontSize: 13, fontWeight: 600 }}>Output</span>
                 {runResult.status === 'accepted'
@@ -1237,10 +1443,29 @@ const ProblemPage: React.FC = () => {
                   ? <span className="badge badge-red" style={{ fontSize: 10 }}>✗ Wrong Answer</span>
                   : <span className="badge badge-yellow" style={{ fontSize: 10 }}>! Error</span>
                 }
-                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--cyan)' }}>
+                <span style={{ fontSize: 12, color: 'var(--cyan)' }}>
                   <Clock size={12} style={{ verticalAlign: 'middle' }} /> {runResult.runtime}ms &nbsp;
                   <span style={{ color: 'var(--text-3)' }}>{runResult.passed}/{runResult.total} passed</span>
                 </span>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: '2px 7px', fontSize: 11, gap: 4 }}
+                    onClick={() => setIsOutputMinimized(v => !v)}
+                    title={isOutputMinimized ? 'Expand Output' : 'Minimize Output'}>
+                    {isOutputMinimized ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    {isOutputMinimized ? 'Expand' : 'Minimize'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: '2px 6px', fontSize: 11 }}
+                    onClick={() => setRunResult(null)}
+                    title="Close output panel">
+                    <X size={12} />
+                  </button>
+                </div>
               </div>
               {/* Summary line */}
               <div className="terminal" style={{ fontSize: 12, marginBottom: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>

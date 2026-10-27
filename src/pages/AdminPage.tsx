@@ -13,6 +13,7 @@ import {
   Database, CheckCircle2, Activity, Award, Clock, Zap,
   Eye, EyeOff, Table2, ThumbsUp, ThumbsDown, Calendar, ListChecks,
   ClipboardList, Code2, Play, MessageSquare, Terminal,
+  Maximize2, Minimize2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { Problem } from './ProblemsPage';
@@ -166,6 +167,27 @@ const AdminPage: React.FC = () => {
   const [savingTask, setSavingTask] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string|null>(null);
   const [testsCount, setTestsCount] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handler = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setIsFullscreen(false);
+    }
+  };
 
   useEffect(() => {
     if (!isAdmin) { navigate('/'); return; }
@@ -456,10 +478,17 @@ const AdminPage: React.FC = () => {
     if (!dbmsForm.title.trim() || !dbmsForm.description.trim()) {
       toast.error('Title and description required!'); return;
     }
+    if (!dbmsForm.expectedOutput || !dbmsForm.expectedOutput.trim()) {
+      toast.error('⚠️ Expected Output is mandatory! Students need this to verify their answers.');
+      return;
+    }
     setSavingDbms(true);
     try {
       const data = {
-        ...dbmsForm, title: dbmsForm.title.trim(), description: dbmsForm.description.trim(),
+        ...dbmsForm,
+        title: dbmsForm.title.trim(),
+        description: dbmsForm.description.trim(),
+        expectedOutput: dbmsForm.expectedOutput.trim(),
         addedBy: profile?.displayName || 'Admin',
         ...(editingDbmsId ? { updatedAt: serverTimestamp() } : { createdAt: serverTimestamp() }),
       };
@@ -555,8 +584,8 @@ const AdminPage: React.FC = () => {
   return (
     <>
       <Navbar />
-      <div className="page">
-        <div className="page-content" style={{ position: 'relative' }}>
+      <div className="page" style={{ paddingTop: 64, minHeight: '100vh', width: '100%' }}>
+        <div className="admin-page-full" style={{ position: 'relative' }}>
 
           {/* ── Fixed Watermark ────────────────────────────────── */}
           <div style={{
@@ -588,10 +617,24 @@ const AdminPage: React.FC = () => {
                   </span>
                 </h1>
                 <p style={{ color: 'var(--text-3)', fontSize: 12, marginTop: 3 }}>
-                  College Assessment Hub · 2 Problem Tracks (Coding & SQL) · Live MCQ Tests · Analytics
+                  College Assessment Hub · 2 Problem Tracks (Coding & SQL) · Live MCQ Tests · Analytics · Edge-to-Edge Full Screen
                 </p>
               </div>
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{
+                    color: isFullscreen ? 'var(--cyan)' : 'var(--text-2)',
+                    borderColor: isFullscreen ? 'rgba(34,211,238,0.4)' : 'var(--border)',
+                    background: isFullscreen ? 'rgba(34,211,238,0.1)' : 'transparent',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}
+                  onClick={toggleFullscreen}
+                  title="Toggle Fullscreen Edge-to-Edge Mode">
+                  {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                  {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Mode'}
+                </button>
                 {tab === 'problems' && !showForm && (
                   <button className="btn btn-primary" onClick={() => { resetForm(); setShowForm(true); }}>
                     <Plus size={14} /> Add Coding Problem

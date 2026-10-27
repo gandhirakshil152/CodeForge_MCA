@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Trophy, BookOpen, LayoutDashboard, LogOut, Shield, Zap,
-  Database, FileQuestion, Bell, X, CheckCheck, Menu, ClipboardList,
+  Database, FileQuestion, Bell, X, CheckCheck, Menu, ClipboardList, Scale, History,
 } from 'lucide-react';
 import {
   collection, query, where, onSnapshot, orderBy, limit,
@@ -130,6 +130,12 @@ const Navbar: React.FC = () => {
       <Link to="/leaderboard" className={`nav-link ${isActive('/leaderboard') ? 'active' : ''}`}>
         <Trophy size={15} /> Leaderboard
       </Link>
+      <Link to="/rules" className={`nav-link ${isActive('/rules') ? 'active' : ''}`}>
+        <Scale size={15} /> Rules
+      </Link>
+      <Link to="/history" className={`nav-link ${isActive('/history') ? 'active' : ''}`}>
+        <History size={15} /> History
+      </Link>
       {isAdmin && (
         <Link to="/admin" className={`nav-link ${isActive('/admin') ? 'active' : ''}`} style={{ color: 'var(--yellow)' }}>
           <Shield size={15} /> Admin
@@ -143,6 +149,7 @@ const Navbar: React.FC = () => {
       <Link to="/dbms" className="nav-link"><Database size={15} /> DBMS</Link>
       <Link to="/ppt-quiz" className="nav-link"><FileQuestion size={15} /> PPT Quiz</Link>
       <Link to="/leaderboard" className="nav-link"><Trophy size={15} /> Leaderboard</Link>
+      <Link to="/rules" className="nav-link"><Scale size={15} /> Rules</Link>
     </>
   );
 

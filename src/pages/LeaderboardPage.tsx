@@ -202,6 +202,11 @@ const LeaderboardPage: React.FC = () => {
             <p style={{ color: 'var(--text-2)', marginTop: 8, fontSize: 15, maxWidth: 620, margin: '8px auto 0' }}>
               Compare performances across Global DSA challenges, placement MCQ tests, and live Programming coding drives.
             </p>
+            <div style={{ marginTop: 14 }}>
+              <Link to="/rules" className="btn btn-ghost btn-sm" style={{ gap: 6, fontSize: 12, borderColor: 'rgba(245,158,11,0.3)', color: 'var(--yellow)' }}>
+                📜 View How Points &amp; Rankings are Counted →
+              </Link>
+            </div>
           </div>
 
           {/* PRIMARY CATEGORY SELECTOR (GLOBAL vs MCQ TESTS vs PROGRAMMING TESTS) */}

@@ -403,6 +403,100 @@ label {
   100% { opacity: 0; transform: translateY(100vh); }
 }
 
+/* ── NEW: Coding Animations ─────────────────────────────────── */
+@keyframes code-float-up {
+  0%   { transform: translateY(0) translateX(0); opacity: 0.15; }
+  50%  { opacity: 0.4; }
+  100% { transform: translateY(-100vh) translateX(20px); opacity: 0; }
+}
+
+@keyframes code-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes scan-line {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.6; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+@keyframes typing-cursor {
+  0%, 100% { border-color: var(--cyan); }
+  50%       { border-color: transparent; }
+}
+
+@keyframes node-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(56,189,248,0.4), 0 0 20px rgba(56,189,248,0.1); }
+  50%       { box-shadow: 0 0 20px rgba(56,189,248,0.8), 0 0 40px rgba(56,189,248,0.3); }
+}
+
+/* Code rain symbol layer — placed in body::before */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(ellipse at 15% 30%, rgba(37,99,235,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse at 85% 70%, rgba(56,189,248,0.08) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 10%, rgba(99,102,241,0.07) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+  animation: gradient-shift 12s ease infinite;
+  background-size: 300% 300%;
+}
+
+/* Subtle horizontal scan line */
+body::after {
+  content: '';
+  position: fixed;
+  left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(56,189,248,0.06), rgba(99,102,241,0.08), rgba(56,189,248,0.06), transparent);
+  pointer-events: none;
+  z-index: 0;
+  animation: scan-line 8s ease-in-out infinite;
+}
+
+.code-rain-canvas {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.035;
+}
+
+/* Animated code symbols floating background */
+.code-symbol {
+  position: fixed;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--cyan);
+  pointer-events: none;
+  z-index: 0;
+  animation: code-float-up linear infinite;
+  will-change: transform, opacity;
+}
+
+/* Typing cursor effect */
+.typing-cursor::after {
+  content: '|';
+  animation: code-blink 1s step-end infinite;
+  color: var(--cyan);
+}
+
+/* Node pulse effect for status dots */
+.node-pulse {
+  animation: node-pulse 2s ease-in-out infinite;
+}
+
 .animate-fade-up   { animation: fadeInUp 0.6s ease forwards; }
 .animate-fade-in   { animation: fadeIn 0.4s ease forwards; }
 .animate-float     { animation: float 3s ease-in-out infinite; }
@@ -515,6 +609,17 @@ label {
 /* ── Page Layout ────────────────────────────────────────────── */
 .page { padding-top: 64px; min-height: 100vh; }
 .page-content { padding: 32px 24px; max-width: 1280px; margin: 0 auto; }
+.admin-page-full {
+  padding: 24px 36px 64px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 768px) {
+  .admin-page-full {
+    padding: 16px 14px 48px;
+  }
+}
 
 /* ── Problem Card ────────────────────────────────────────────── */
 .problem-card {
@@ -1031,6 +1136,11 @@ tr:hover td { background: var(--bg-glass); }
   gap: 0;
   height: calc(100vh - 64px);
   overflow: hidden;
+  transition: grid-template-columns 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.problem-layout.editor-expanded {
+  grid-template-columns: 360px 1fr;
 }
 
 .problem-desc-panel {
@@ -1042,6 +1152,16 @@ tr:hover td { background: var(--bg-glass); }
 .problem-code-panel {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  background: rgba(5, 5, 14, 0.95);
+  position: relative;
+  min-height: 480px;
+}
+
+.problem-editor-container {
+  flex: 1;
+  min-height: 380px;
+  position: relative;
   overflow: hidden;
 }
 
