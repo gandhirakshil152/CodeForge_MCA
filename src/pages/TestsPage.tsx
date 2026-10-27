@@ -7,7 +7,7 @@ import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import {
   ClipboardList, Clock, Trophy, Lock, CheckCircle2, Play,
-  Calendar, BookOpen, X, ExternalLink
+  Calendar, BookOpen, X, ExternalLink, Eye,
 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 
@@ -330,20 +330,38 @@ const TestsPage: React.FC = () => {
                     {/* Result or CTA + Live Leaderboard button */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
                       {done ? (
-                        <div style={{
-                          padding: '10px 14px', borderRadius: 10,
-                          background: result.score >= t.passingScore ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                          border: `1px solid ${result.score >= t.passingScore ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-                          display: 'flex', alignItems: 'center', gap: 10,
-                        }}>
-                          <CheckCircle2 size={16} color={result.score >= t.passingScore ? 'var(--green)' : 'var(--red)'} />
-                          <span style={{ fontSize: 13, fontWeight: 600 }}>
-                            Score: {result.score}/{result.totalMarks} ({Math.round((result.score / result.totalMarks) * 100)}%)
-                          </span>
-                          <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 'auto' }}>
-                            {result.score >= t.passingScore ? 'PASS' : 'FAIL'}
-                          </span>
-                        </div>
+                        <>
+                          <div style={{
+                            padding: '10px 14px', borderRadius: 10,
+                            background: result.score >= t.passingScore ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                            border: `1px solid ${result.score >= t.passingScore ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                            display: 'flex', alignItems: 'center', gap: 10,
+                          }}>
+                            <CheckCircle2 size={16} color={result.score >= t.passingScore ? 'var(--green)' : 'var(--red)'} />
+                            <span style={{ fontSize: 13, fontWeight: 600 }}>
+                              Score: {result.score}/{result.totalMarks} ({Math.round((result.score / result.totalMarks) * 100)}%)
+                            </span>
+                            <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 'auto' }}>
+                              {result.score >= t.passingScore ? 'PASS' : 'FAIL'}
+                            </span>
+                          </div>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{
+                              width: '100%',
+                              justifyContent: 'center',
+                              color: 'var(--cyan)',
+                              border: '1px solid rgba(34,211,238,0.3)',
+                              background: 'rgba(34,211,238,0.05)',
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/test/${t.id}`);
+                            }}
+                          >
+                            <Eye size={13} /> View Scorecard &amp; Mistakes
+                          </button>
+                        </>
                       ) : canGo ? (
                         <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
                           <Play size={15} /> Start Test

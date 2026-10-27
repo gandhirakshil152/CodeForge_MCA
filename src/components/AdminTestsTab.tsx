@@ -2,13 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   query, where, orderBy, onSnapshot, serverTimestamp, writeBatch,
+  getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import {
   ClipboardList, Plus, Trash2, Edit3, Upload, Download,
   Eye, Clock, Users, Trophy, X, FileSpreadsheet,
-  HelpCircle, Code2, ExternalLink, Sparkles, Layers
+  HelpCircle, Code2, ExternalLink, Sparkles, Layers,
+  Search, CheckCircle2, XCircle, Filter,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { MCQTest } from '../pages/TestsPage';
@@ -133,6 +135,64 @@ export const AdminTestsTab: React.FC<AdminTestsTabProps> = ({ users = [] }) => {
   // Live Leaderboard Modal
   const [leaderboardTest, setLeaderboardTest] = useState<MCQTest | null>(null);
   const [leaderboardResults, setLeaderboardResults] = useState<any[]>([]);
+
+  // Student Mistake Inspection Modal State
+  const [selectedReviewResult, setSelectedReviewResult] = useState<any | null>(null);
+  const [reviewMistakeFilter, setReviewMistakeFilter] = useState<'all' | 'mistakes' | 'correct' | 'unanswered'>('all');
+  const [reviewQuestionsMap, setReviewQuestionsMap] = useState<Record<string, any>>({});
+  const [loadingReviewQuestions, setLoadingReviewQuestions] = useState(false);
+
+  // Monitor Search & Student Filter State
+  const [monitorStudentSearch, setMonitorStudentSearch] = useState('');
+  const [monitorMistakeFilter, setMonitorMistakeFilter] = useState<'all' | 'mistakes' | 'clean' | 'passed' | 'failed'>('all');
+
+  // Global Student Results & Mistake Finder Modal State
+  const [showGlobalResultsModal, setShowGlobalResultsModal] = useState(false);
+  const [globalAllResults, setGlobalAllResults] = useState<any[]>([]);
+  const [globalTestFilter, setGlobalTestFilter] = useState('all');
+  const [globalStudentSearch, setGlobalStudentSearch] = useState('');
+  const [globalMistakeFilter, setGlobalMistakeFilter] = useState<'all' | 'mistakes' | 'clean' | 'passed' | 'failed'>('all');
+  const [loadingGlobalResults, setLoadingGlobalResults] = useState(false);
+
+  // Fetch questions for selected student's test review
+  useEffect(() => {
+    if (!selectedReviewResult?.testId) {
+      setReviewQuestionsMap({});
+      return;
+    }
+    const fetchQuestions = async () => {
+      setLoadingReviewQuestions(true);
+      try {
+        const qSnap = await getDocs(
+          query(collection(db, 'mcq_questions'), where('testId', '==', selectedReviewResult.testId))
+        );
+        const map: Record<string, any> = {};
+        qSnap.docs.forEach(d => { map[d.id] = { id: d.id, ...d.data() }; });
+        setReviewQuestionsMap(map);
+      } catch (err) {
+        console.warn('Error fetching test questions for admin review:', err);
+      } finally {
+        setLoadingReviewQuestions(false);
+      }
+    };
+    fetchQuestions();
+  }, [selectedReviewResult]);
+
+  // Real-time listener for global results across all tests
+  useEffect(() => {
+    if (!showGlobalResultsModal) return;
+    setLoadingGlobalResults(true);
+    const q = query(collection(db, 'test_results'), orderBy('submittedAt', 'desc'));
+    const unsub = onSnapshot(q, snap => {
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setGlobalAllResults(all);
+      setLoadingGlobalResults(false);
+    }, (err) => {
+      console.warn('Error streaming all test results:', err);
+      setLoadingGlobalResults(false);
+    });
+    return unsub;
+  }, [showGlobalResultsModal]);
 
   // Real-time listener for tests
   useEffect(() => {
@@ -737,6 +797,14 @@ export const AdminTestsTab: React.FC<AdminTestsTabProps> = ({ users = [] }) => {
             title="Download CSV Template for MCQ upload"
           >
             <Download size={14} /> Download CSV Template
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ border: '1px solid rgba(56,189,248,0.4)', color: 'var(--cyan)', background: 'rgba(56,189,248,0.06)' }}
+            onClick={() => setShowGlobalResultsModal(true)}
+            title="Inspect student results and mistakes across all tests"
+          >
+            <Users size={14} /> 🎓 Student Results &amp; Mistakes
           </button>
           <button
             className="btn btn-primary"
@@ -1551,91 +1619,171 @@ export const AdminTestsTab: React.FC<AdminTestsTabProps> = ({ users = [] }) => {
                 )}
 
                 {/* Section 2: Real-time Shuffled Submissions Leaderboard */}
-                {(monitorViewTab === 'all' || monitorViewTab === 'shuffled') && (
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                      <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Trophy size={15} color="var(--yellow)" />
-                        Real-time Shuffled Leaderboard ({liveResults.length} Submissions)
-                      </h4>
-                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Sorted by score &amp; speed (Ranks shuffle live)</span>
-                    </div>
+                {(monitorViewTab === 'all' || monitorViewTab === 'shuffled') && (() => {
+                  const filteredLiveResults = liveResults.filter(r => {
+                    const q = monitorStudentSearch.trim().toLowerCase();
+                    const matchesSearch = !q ||
+                      (r.userName && r.userName.toLowerCase().includes(q)) ||
+                      (r.userEmail && r.userEmail.toLowerCase().includes(q));
+                    if (!matchesSearch) return false;
 
-                    {monitorLoading && liveResults.length === 0 ? (
-                      <div style={{ padding: 40, textAlign: 'center' }}>
-                        <div className="spinner" style={{ margin: '0 auto 10px' }} />
-                        <p style={{ color: 'var(--text-3)' }}>Connecting to live monitor stream...</p>
+                    if (monitorMistakeFilter === 'mistakes') return (r.incorrect || 0) > 0;
+                    if (monitorMistakeFilter === 'clean') return (r.incorrect || 0) === 0;
+                    if (monitorMistakeFilter === 'passed') return !!r.passed;
+                    if (monitorMistakeFilter === 'failed') return !r.passed;
+                    return true;
+                  });
+
+                  return (
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                        <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Trophy size={15} color="var(--yellow)" />
+                          Real-time Shuffled Leaderboard ({filteredLiveResults.length} of {liveResults.length} Submissions)
+                        </h4>
+                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Immediate results sync • Inspect any student's mistakes</span>
                       </div>
-                    ) : liveResults.length === 0 ? (
-                      <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
-                        <Clock size={32} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
-                        <p>No student submissions recorded yet.</p>
-                        <p style={{ fontSize: 12, marginTop: 4 }}>Submissions will shuffle here in real-time as candidates finish.</p>
+
+                      {/* Instant Student Filter & Search Bar */}
+                      <div style={{
+                        display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center',
+                        marginBottom: 14, padding: '10px 14px', background: 'rgba(255,255,255,0.02)',
+                        borderRadius: 'var(--radius-md)', border: '1px solid var(--border)',
+                      }}>
+                        <div style={{ position: 'relative', flex: '1 1 220px' }}>
+                          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+                          <input
+                            className="input"
+                            style={{ paddingLeft: 32, fontSize: 12, height: 34 }}
+                            placeholder="Filter by student name or email..."
+                            value={monitorStudentSearch}
+                            onChange={e => setMonitorStudentSearch(e.target.value)}
+                          />
+                        </div>
+
+                        <select
+                          className="input"
+                          style={{ width: 'auto', minWidth: 160, fontSize: 12, height: 34 }}
+                          value={monitorMistakeFilter}
+                          onChange={e => setMonitorMistakeFilter(e.target.value as any)}
+                        >
+                          <option value="all">All Submissions ({liveResults.length})</option>
+                          <option value="mistakes">❌ Has Mistakes ({liveResults.filter(r => (r.incorrect || 0) > 0).length})</option>
+                          <option value="clean">✅ Zero Mistakes ({liveResults.filter(r => (r.incorrect || 0) === 0).length})</option>
+                          <option value="passed">🟢 Passed ({liveResults.filter(r => r.passed).length})</option>
+                          <option value="failed">🔴 Failed ({liveResults.filter(r => !r.passed).length})</option>
+                        </select>
+
+                        {(monitorStudentSearch || monitorMistakeFilter !== 'all') && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ fontSize: 11, height: 34 }}
+                            onClick={() => { setMonitorStudentSearch(''); setMonitorMistakeFilter('all'); }}
+                          >
+                            <X size={12} /> Clear Filter
+                          </button>
+                        )}
                       </div>
-                    ) : (
-                      <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
-                        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', textAlign: 'left' }}>
-                          <thead>
-                            <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)', color: 'var(--text-3)' }}>
-                              <th style={{ padding: '10px 12px' }}>Rank</th>
-                              <th style={{ padding: '10px 12px' }}>Candidate</th>
-                              <th style={{ padding: '10px 12px' }}>Score</th>
-                              <th style={{ padding: '10px 12px' }}>Status</th>
-                              <th style={{ padding: '10px 12px' }}>Anti-Cheat Violations</th>
-                              <th style={{ padding: '10px 12px' }}>Time Taken</th>
-                              <th style={{ padding: '10px 12px' }}>Submitted</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {liveResults.map((r, i) => {
-                              const isTop3 = i < 3;
-                              const medal = i === 0 ? '🥇 #1' : i === 1 ? '🥈 #2' : i === 2 ? '🥉 #3' : `#${i + 1}`;
-                              return (
-                                <tr key={r.id || i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', background: isTop3 ? 'rgba(56,189,248,0.04)' : 'transparent' }}>
-                                  <td style={{ padding: '10px 12px', fontWeight: 800, color: isTop3 ? 'var(--yellow)' : 'var(--text-3)' }}>
-                                    {medal}
-                                  </td>
-                                  <td style={{ padding: '10px 12px' }}>
-                                    <div style={{ fontWeight: 600, color: 'var(--text-1)' }}>{r.userName || 'Student'}</div>
-                                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{r.userEmail || ''}</div>
-                                  </td>
-                                  <td style={{ padding: '10px 12px' }}>
-                                    <div style={{ fontWeight: 700, color: r.passed ? 'var(--green)' : 'var(--red)', fontSize: 13 }}>
-                                      {r.score}/{r.totalMarks} ({r.percentage}%)
-                                    </div>
-                                    <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
-                                      ✓ {r.correct || 0} | ✗ {r.incorrect || 0}
-                                    </div>
-                                  </td>
-                                  <td style={{ padding: '10px 12px' }}>
-                                    <span className={`badge ${r.passed ? 'badge-green' : 'badge-red'}`} style={{ fontSize: 10 }}>
-                                      {r.passed ? 'PASSED' : 'FAILED'}
-                                    </span>
-                                  </td>
-                                  <td style={{ padding: '10px 12px' }}>
-                                    {r.warnings && r.warnings > 0 ? (
-                                      <span style={{ color: r.warnings >= 3 ? 'var(--red)' : 'var(--yellow)', fontWeight: 600 }}>
-                                        ⚠️ {r.warnings} switch{r.warnings > 1 ? 'es' : ''} {r.autoSubmitted ? '(Auto-submitted)' : ''}
+
+                      {monitorLoading && liveResults.length === 0 ? (
+                        <div style={{ padding: 40, textAlign: 'center' }}>
+                          <div className="spinner" style={{ margin: '0 auto 10px' }} />
+                          <p style={{ color: 'var(--text-3)' }}>Connecting to live monitor stream...</p>
+                        </div>
+                      ) : filteredLiveResults.length === 0 ? (
+                        <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
+                          <Clock size={32} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                          <p>{liveResults.length === 0 ? 'No student submissions recorded yet.' : 'No students matching this filter.'}</p>
+                          <p style={{ fontSize: 12, marginTop: 4 }}>
+                            {liveResults.length === 0 ? 'Submissions will stream here immediately as candidates complete.' : 'Try adjusting the student filter.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', textAlign: 'left' }}>
+                            <thead>
+                              <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)', color: 'var(--text-3)' }}>
+                                <th style={{ padding: '10px 12px' }}>Rank</th>
+                                <th style={{ padding: '10px 12px' }}>Candidate</th>
+                                <th style={{ padding: '10px 12px' }}>Score</th>
+                                <th style={{ padding: '10px 12px' }}>Mistakes</th>
+                                <th style={{ padding: '10px 12px' }}>Status</th>
+                                <th style={{ padding: '10px 12px' }}>Anti-Cheat</th>
+                                <th style={{ padding: '10px 12px' }}>Time</th>
+                                <th style={{ padding: '10px 12px' }}>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredLiveResults.map((r, i) => {
+                                const isTop3 = i < 3 && !monitorStudentSearch;
+                                const medal = isTop3 ? (i === 0 ? '🥇 #1' : i === 1 ? '🥈 #2' : '🥉 #3') : `#${i + 1}`;
+                                const hasMistakes = (r.incorrect || 0) > 0;
+
+                                return (
+                                  <tr key={r.id || i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', background: isTop3 ? 'rgba(56,189,248,0.04)' : 'transparent' }}>
+                                    <td style={{ padding: '10px 12px', fontWeight: 800, color: isTop3 ? 'var(--yellow)' : 'var(--text-3)' }}>
+                                      {medal}
+                                    </td>
+                                    <td style={{ padding: '10px 12px' }}>
+                                      <div style={{ fontWeight: 600, color: 'var(--text-1)' }}>{r.userName || 'Student'}</div>
+                                      <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{r.userEmail || ''}</div>
+                                    </td>
+                                    <td style={{ padding: '10px 12px' }}>
+                                      <div style={{ fontWeight: 700, color: r.passed ? 'var(--green)' : 'var(--red)', fontSize: 13 }}>
+                                        {r.score}/{r.totalMarks} ({r.percentage}%)
+                                      </div>
+                                      <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
+                                        ✓ {r.correct || 0} correct
+                                      </div>
+                                    </td>
+                                    <td style={{ padding: '10px 12px' }}>
+                                      {hasMistakes ? (
+                                        <span className="badge badge-red" style={{ fontSize: 11, fontWeight: 700 }}>
+                                          ✕ {r.incorrect} Wrong
+                                        </span>
+                                      ) : (
+                                        <span className="badge badge-green" style={{ fontSize: 11, fontWeight: 700 }}>
+                                          ✓ 0 Mistakes
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td style={{ padding: '10px 12px' }}>
+                                      <span className={`badge ${r.passed ? 'badge-green' : 'badge-red'}`} style={{ fontSize: 10 }}>
+                                        {r.passed ? 'PASSED' : 'FAILED'}
                                       </span>
-                                    ) : (
-                                      <span style={{ color: 'var(--green)', fontSize: 11 }}>✓ 0 (Clean)</span>
-                                    )}
-                                  </td>
-                                  <td style={{ padding: '10px 12px', color: 'var(--text-2)' }}>
-                                    {r.timeTaken ? `${Math.floor(r.timeTaken / 60)}m ${r.timeTaken % 60}s` : '—'}
-                                  </td>
-                                  <td style={{ padding: '10px 12px', color: 'var(--text-3)' }}>
-                                    {r.submittedAt?.toDate ? r.submittedAt.toDate().toLocaleTimeString() : '—'}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
+                                    </td>
+                                    <td style={{ padding: '10px 12px' }}>
+                                      {r.warnings && r.warnings > 0 ? (
+                                        <span style={{ color: r.warnings >= 3 ? 'var(--red)' : 'var(--yellow)', fontWeight: 600, fontSize: 11 }}>
+                                          ⚠️ {r.warnings} switch{r.warnings > 1 ? 'es' : ''}
+                                        </span>
+                                      ) : (
+                                        <span style={{ color: 'var(--green)', fontSize: 11 }}>✓ Clean</span>
+                                      )}
+                                    </td>
+                                    <td style={{ padding: '10px 12px', color: 'var(--text-2)', fontSize: 11 }}>
+                                      {r.timeTaken ? `${Math.floor(r.timeTaken / 60)}m ${r.timeTaken % 60}s` : '—'}
+                                    </td>
+                                    <td style={{ padding: '10px 12px' }}>
+                                      <button
+                                        className="btn btn-primary btn-sm"
+                                        style={{ fontSize: 11, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+                                        onClick={() => setSelectedReviewResult(r)}
+                                        title="View question-by-question mistake breakdown for this student"
+                                      >
+                                        <Eye size={12} /> Inspect Mistakes
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2182,6 +2330,550 @@ export const AdminTestsTab: React.FC<AdminTestsTabProps> = ({ users = [] }) => {
           </div>
         </div>
       )}
+
+      {/* ══════════════════════════════════════════════════════════════
+          STUDENT MISTAKE & ANSWER INSPECTION MODAL (ADMIN)
+      ══════════════════════════════════════════════════════════════ */}
+      {selectedReviewResult && (() => {
+        const sr = selectedReviewResult;
+        const testTitle = sr.testTitle || monitoringTest?.title || 'Placement Assessment';
+
+        // Reconcile question list from detailedAnswers and reviewQuestionsMap
+        const reviewItems: any[] = (sr.detailedAnswers && sr.detailedAnswers.length > 0)
+          ? sr.detailedAnswers.map((da: any, idx: number) => {
+              const matchedQ = reviewQuestionsMap[da.qId];
+              return {
+                ...da,
+                question: da.question || matchedQ?.question || `Question ${idx + 1}`,
+                options: (da.options && da.options.length > 0) ? da.options : (matchedQ?.options || []),
+                explanation: da.explanation || matchedQ?.explanation || '',
+                marks: da.marks || matchedQ?.marks || 1,
+                negativeMarks: da.negativeMarks ?? matchedQ?.negativeMarks ?? 0,
+                imageUrl: matchedQ?.imageUrl,
+              };
+            })
+          : Object.values(reviewQuestionsMap).map((q: any) => ({
+              qId: q.id,
+              type: q.type || 'mcq',
+              question: q.question,
+              options: q.options || [],
+              given: null,
+              correct: q.correctIndex ?? 0,
+              isCorrect: false,
+              unanswered: true,
+              explanation: q.explanation || '',
+              marks: q.marks || 1,
+              imageUrl: q.imageUrl,
+            }));
+
+        const mistakesList = reviewItems.filter(item =>
+          item.type === 'coding' ? !item.isCorrect : (!item.isCorrect && !item.unanswered)
+        );
+        const correctList = reviewItems.filter(item => item.isCorrect);
+        const unansweredList = reviewItems.filter(item => item.unanswered);
+
+        const displayedReviewItems = reviewMistakeFilter === 'mistakes'
+          ? mistakesList
+          : reviewMistakeFilter === 'correct'
+          ? correctList
+          : reviewMistakeFilter === 'unanswered'
+          ? unansweredList
+          : reviewItems;
+
+        return (
+          <div className="modal-overlay" style={{ zIndex: 1200 }} onClick={() => setSelectedReviewResult(null)}>
+            <div className="modal" style={{ maxWidth: 860, width: '95%' }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="avatar" style={{ width: 32, height: 32, fontSize: 13, background: 'linear-gradient(135deg, var(--purple), var(--cyan))' }}>
+                      {sr.userName?.[0]?.toUpperCase() || 'S'}
+                    </div>
+                    <div>
+                      <h3 style={{ fontWeight: 800, fontSize: 18, color: 'var(--text-1)' }}>
+                        {sr.userName || 'Student'} — Mistake Breakdown
+                      </h3>
+                      <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        {sr.userEmail || ''} • {testTitle}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <button className="btn btn-ghost btn-sm" onClick={() => setSelectedReviewResult(null)}>
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
+                {/* Student Scorecard Summary Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, marginBottom: 18 }}>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--purple-light)' }}>{sr.score}/{sr.totalMarks}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Score ({sr.percentage}%)</div>
+                  </div>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: sr.passed ? 'var(--green)' : 'var(--red)' }}>
+                      {sr.passed ? 'PASSED' : 'FAILED'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Outcome</div>
+                  </div>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center', border: mistakesList.length > 0 ? '1px solid rgba(239,68,68,0.4)' : undefined }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: '#f87171' }}>✕ {sr.incorrect ?? mistakesList.length}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Mistakes Made</div>
+                  </div>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--green)' }}>✓ {sr.correct ?? correctList.length}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Correct Answers</div>
+                  </div>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--yellow)' }}>⚪ {sr.unanswered ?? unansweredList.length}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Skipped</div>
+                  </div>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: (sr.warnings || 0) > 0 ? 'var(--red)' : 'var(--green)' }}>
+                      {sr.warnings ? `⚠️ ${sr.warnings}` : '✓ Clean'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Tab Switches</div>
+                  </div>
+                </div>
+
+                {/* Filter Pills */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Filter size={12} /> Filter Questions:
+                  </span>
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      background: reviewMistakeFilter === 'all' ? 'var(--blue)' : 'rgba(255,255,255,0.04)',
+                      color: '#fff', fontSize: 11, fontWeight: 600,
+                    }}
+                    onClick={() => setReviewMistakeFilter('all')}
+                  >
+                    All Questions ({reviewItems.length})
+                  </button>
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      background: reviewMistakeFilter === 'mistakes' ? '#ef4444' : 'rgba(239,68,68,0.12)',
+                      border: '1px solid rgba(239,68,68,0.4)',
+                      color: reviewMistakeFilter === 'mistakes' ? '#fff' : '#f87171',
+                      fontSize: 11, fontWeight: 700,
+                    }}
+                    onClick={() => setReviewMistakeFilter('mistakes')}
+                  >
+                    <XCircle size={12} style={{ marginRight: 4 }} />
+                    Mistakes Only ({mistakesList.length})
+                  </button>
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      background: reviewMistakeFilter === 'correct' ? '#10b981' : 'rgba(16,185,129,0.12)',
+                      border: '1px solid rgba(16,185,129,0.4)',
+                      color: reviewMistakeFilter === 'correct' ? '#fff' : 'var(--green)',
+                      fontSize: 11, fontWeight: 600,
+                    }}
+                    onClick={() => setReviewMistakeFilter('correct')}
+                  >
+                    <CheckCircle2 size={12} style={{ marginRight: 4 }} />
+                    Correct ({correctList.length})
+                  </button>
+                  {unansweredList.length > 0 && (
+                    <button
+                      className="btn btn-sm"
+                      style={{
+                        background: reviewMistakeFilter === 'unanswered' ? '#f59e0b' : 'rgba(245,158,11,0.12)',
+                        border: '1px solid rgba(245,158,11,0.4)',
+                        color: reviewMistakeFilter === 'unanswered' ? '#000' : 'var(--yellow)',
+                        fontSize: 11, fontWeight: 600,
+                      }}
+                      onClick={() => setReviewMistakeFilter('unanswered')}
+                    >
+                      ⚪ Skipped ({unansweredList.length})
+                    </button>
+                  )}
+                </div>
+
+                {loadingReviewQuestions && (
+                  <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+                    Loading question references...
+                  </div>
+                )}
+
+                {/* If mistakes only selected and 0 mistakes */}
+                {reviewMistakeFilter === 'mistakes' && mistakesList.length === 0 && (
+                  <div className="glass-card" style={{ padding: 30, textAlign: 'center', border: '1px solid rgba(16,185,129,0.3)' }}>
+                    <div style={{ fontSize: 36, marginBottom: 8 }}>🌟</div>
+                    <div style={{ fontWeight: 700, color: 'var(--green)', fontSize: 15 }}>No Mistakes Found!</div>
+                    <p style={{ color: 'var(--text-3)', fontSize: 12, marginTop: 4 }}>This student answered all questions correctly with 100% accuracy.</p>
+                  </div>
+                )}
+
+                {/* Question List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {displayedReviewItems.map((item: any, idx: number) => {
+                    const isCorrect = !!item.isCorrect;
+                    const isUnanswered = !!item.unanswered;
+                    const isMistake = !isCorrect && !isUnanswered;
+                    const isCoding = item.type === 'coding';
+
+                    return (
+                      <div
+                        key={item.qId || idx}
+                        className="glass-card"
+                        style={{
+                          padding: 18,
+                          border: isCorrect
+                            ? '1px solid rgba(16,185,129,0.35)'
+                            : isMistake
+                            ? '1px solid rgba(239,68,68,0.45)'
+                            : '1px solid rgba(245,158,11,0.3)',
+                          background: isMistake
+                            ? 'linear-gradient(180deg, rgba(239,68,68,0.06) 0%, rgba(11,23,48,0.6) 100%)'
+                            : isCorrect
+                            ? 'linear-gradient(180deg, rgba(16,185,129,0.04) 0%, rgba(11,23,48,0.6) 100%)'
+                            : 'rgba(11,23,48,0.4)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontWeight: 800, fontSize: 12, padding: '2px 8px', borderRadius: 4, background: 'rgba(255,255,255,0.08)' }}>
+                              Q{reviewItems.indexOf(item) + 1}
+                            </span>
+                            {isCorrect ? (
+                              <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Correct (+{item.marks} pts)</span>
+                            ) : isMistake ? (
+                              <span className="badge badge-red" style={{ fontSize: 10 }}>✕ Student Mistake</span>
+                            ) : (
+                              <span className="badge badge-yellow" style={{ fontSize: 10 }}>⚪ Skipped</span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Marks: {item.marks}</span>
+                        </div>
+
+                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', lineHeight: 1.4, marginBottom: 14 }}>
+                          {item.question}
+                        </div>
+
+                        {item.imageUrl && (
+                          <div style={{ marginBottom: 14 }}>
+                            <img src={item.imageUrl} alt="Question diagram" style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 6 }} />
+                          </div>
+                        )}
+
+                        {/* MCQ Options */}
+                        {!isCoding && item.options && item.options.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                            {item.options.map((opt: string, optIdx: number) => {
+                              const isStudentPick = item.given === optIdx;
+                              const isCorrectAnswer = item.correct === optIdx;
+                              const isWrongPick = isStudentPick && !isCorrectAnswer;
+
+                              let bg = 'rgba(255,255,255,0.02)';
+                              let border = '1px solid rgba(255,255,255,0.05)';
+                              let col = 'var(--text-2)';
+                              let tag = null;
+
+                              if (isCorrectAnswer) {
+                                bg = 'rgba(16,185,129,0.12)';
+                                border = '1px solid rgba(16,185,129,0.5)';
+                                col = 'var(--green)';
+                                tag = (
+                                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(16,185,129,0.25)', color: 'var(--green)', marginLeft: 'auto' }}>
+                                    ✓ Correct Answer
+                                  </span>
+                                );
+                              } else if (isWrongPick) {
+                                bg = 'rgba(239,68,68,0.12)';
+                                border = '1px solid rgba(239,68,68,0.55)';
+                                col = '#f87171';
+                                tag = (
+                                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(239,68,68,0.25)', color: '#f87171', marginLeft: 'auto' }}>
+                                    ✕ Student Chose This (Mistake)
+                                  </span>
+                                );
+                              }
+
+                              const letter = String.fromCharCode(65 + optIdx);
+                              return (
+                                <div key={optIdx} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 6, background: bg, border, color: col }}>
+                                  <div style={{
+                                    width: 22, height: 22, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: 11, fontWeight: 700, flexShrink: 0,
+                                    background: isCorrectAnswer ? 'var(--green)' : isWrongPick ? 'var(--red)' : 'rgba(255,255,255,0.06)',
+                                    color: (isCorrectAnswer || isWrongPick) ? '#fff' : 'var(--text-2)',
+                                  }}>
+                                    {letter}
+                                  </div>
+                                  <div style={{ fontSize: 12, flex: 1 }}>{opt}</div>
+                                  {tag}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Coding Question */}
+                        {isCoding && (
+                          <div style={{ marginBottom: 12 }}>
+                            <div style={{ fontSize: 12, color: 'var(--cyan)', marginBottom: 6 }}>
+                              💻 Language: {item.lang || 'java'} • Passed: {item.passed || 0}/{item.total || 0}
+                            </div>
+                            <pre style={{ background: 'rgba(0,0,0,0.6)', padding: 10, borderRadius: 6, fontSize: 11, color: '#38bdf8', overflowX: 'auto', maxHeight: 180 }}>
+                              {item.code || '// No code submitted'}
+                            </pre>
+                          </div>
+                        )}
+
+                        {/* Explanation */}
+                        {item.explanation && (
+                          <div style={{ padding: '8px 12px', borderRadius: 6, background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.2)', fontSize: 12 }}>
+                            <span style={{ fontWeight: 700, color: 'var(--cyan)' }}>💡 Solution &amp; Explanation: </span>
+                            <span style={{ color: 'var(--text-1)' }}>{item.explanation}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  Student test audit • Red indicates incorrect candidate choices
+                </span>
+                <button className="btn btn-ghost" onClick={() => setSelectedReviewResult(null)}>Close</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══════════════════════════════════════════════════════════════
+          GLOBAL STUDENT RESULTS & MISTAKE FINDER MODAL (ADMIN)
+      ══════════════════════════════════════════════════════════════ */}
+      {showGlobalResultsModal && (() => {
+        const filteredGlobalResults = globalAllResults.filter(r => {
+          if (globalTestFilter !== 'all' && r.testId !== globalTestFilter) return false;
+          const q = globalStudentSearch.trim().toLowerCase();
+          const matchesStudent = !q ||
+            (r.userName && r.userName.toLowerCase().includes(q)) ||
+            (r.userEmail && r.userEmail.toLowerCase().includes(q));
+          if (!matchesStudent) return false;
+
+          if (globalMistakeFilter === 'mistakes') return (r.incorrect || 0) > 0;
+          if (globalMistakeFilter === 'clean') return (r.incorrect || 0) === 0;
+          if (globalMistakeFilter === 'passed') return !!r.passed;
+          if (globalMistakeFilter === 'failed') return !r.passed;
+          return true;
+        });
+
+        return (
+          <div className="modal-overlay" onClick={() => setShowGlobalResultsModal(false)}>
+            <div className="modal" style={{ maxWidth: 960, width: '95%' }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <div>
+                  <h3 style={{ fontWeight: 800, fontSize: 18, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Users size={18} color="var(--cyan)" />
+                    Student Results &amp; Mistake Finder
+                  </h3>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                    Real-time stream of all student test attempts • Filter by student &amp; test to immediately inspect mistakes
+                  </div>
+                </div>
+                <button className="btn btn-ghost btn-sm" onClick={() => setShowGlobalResultsModal(false)}>
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
+                {/* Global Filter Bar */}
+                <div style={{
+                  display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center',
+                  marginBottom: 16, padding: '12px 14px', background: 'rgba(255,255,255,0.02)',
+                  borderRadius: 'var(--radius-md)', border: '1px solid var(--border)',
+                }}>
+                  {/* Test selector */}
+                  <div style={{ flex: '1 1 200px' }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Filter by Test:</label>
+                    <select
+                      className="input"
+                      style={{ fontSize: 12, height: 34 }}
+                      value={globalTestFilter}
+                      onChange={e => setGlobalTestFilter(e.target.value)}
+                    >
+                      <option value="all">All Placement Tests ({tests.length})</option>
+                      {tests.map(t => (
+                        <option key={t.id} value={t.id}>{t.title} ({t.type?.toUpperCase()})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Student search */}
+                  <div style={{ flex: '1 1 220px' }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Search Student:</label>
+                    <div style={{ position: 'relative' }}>
+                      <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+                      <input
+                        className="input"
+                        style={{ paddingLeft: 32, fontSize: 12, height: 34 }}
+                        placeholder="Type student name or email..."
+                        value={globalStudentSearch}
+                        onChange={e => setGlobalStudentSearch(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Mistake filter */}
+                  <div style={{ flex: '1 1 160px' }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Mistake Status:</label>
+                    <select
+                      className="input"
+                      style={{ fontSize: 12, height: 34 }}
+                      value={globalMistakeFilter}
+                      onChange={e => setGlobalMistakeFilter(e.target.value as any)}
+                    >
+                      <option value="all">All Results</option>
+                      <option value="mistakes">❌ Has Mistakes Only</option>
+                      <option value="clean">✅ 100% Correct / Clean</option>
+                      <option value="passed">🟢 Passed</option>
+                      <option value="failed">🔴 Failed</option>
+                    </select>
+                  </div>
+
+                  {(globalTestFilter !== 'all' || globalStudentSearch || globalMistakeFilter !== 'all') && (
+                    <div style={{ alignSelf: 'flex-end' }}>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ height: 34, fontSize: 11 }}
+                        onClick={() => { setGlobalTestFilter('all'); setGlobalStudentSearch(''); setGlobalMistakeFilter('all'); }}
+                      >
+                        Reset Filters
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* KPI counters */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 16 }}>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--cyan)' }}>{filteredGlobalResults.length}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Submissions</div>
+                  </div>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--green)' }}>
+                      {filteredGlobalResults.filter(r => r.passed).length}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Passed</div>
+                  </div>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: '#f87171' }}>
+                      {filteredGlobalResults.filter(r => (r.incorrect || 0) > 0).length}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>With Mistakes</div>
+                  </div>
+                  <div className="glass-card" style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--yellow)' }}>
+                      {filteredGlobalResults.reduce((acc, r) => acc + (r.incorrect || 0), 0)}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Total Errors Analyzed</div>
+                  </div>
+                </div>
+
+                {/* Submissions Table */}
+                {loadingGlobalResults && globalAllResults.length === 0 ? (
+                  <div style={{ padding: 40, textAlign: 'center' }}>
+                    <div className="spinner" style={{ margin: '0 auto 10px' }} />
+                    <p style={{ color: 'var(--text-3)' }}>Streaming student results from database...</p>
+                  </div>
+                ) : filteredGlobalResults.length === 0 ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
+                    <Users size={32} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                    <p>No student results matching filter.</p>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                    <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', textAlign: 'left' }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)', color: 'var(--text-3)' }}>
+                          <th style={{ padding: '10px 12px' }}>Student</th>
+                          <th style={{ padding: '10px 12px' }}>Assessment</th>
+                          <th style={{ padding: '10px 12px' }}>Score</th>
+                          <th style={{ padding: '10px 12px' }}>Mistakes</th>
+                          <th style={{ padding: '10px 12px' }}>Status</th>
+                          <th style={{ padding: '10px 12px' }}>Time</th>
+                          <th style={{ padding: '10px 12px' }}>Submitted At</th>
+                          <th style={{ padding: '10px 12px' }}>Mistake Audit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredGlobalResults.map((r, i) => {
+                          const hasMistakes = (r.incorrect || 0) > 0;
+                          return (
+                            <tr key={r.id || i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                              <td style={{ padding: '10px 12px' }}>
+                                <div style={{ fontWeight: 600, color: 'var(--text-1)' }}>{r.userName || 'Student'}</div>
+                                <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{r.userEmail || ''}</div>
+                              </td>
+                              <td style={{ padding: '10px 12px' }}>
+                                <span style={{ color: 'var(--cyan)', fontWeight: 500 }}>{r.testTitle || 'Placement Test'}</span>
+                              </td>
+                              <td style={{ padding: '10px 12px' }}>
+                                <div style={{ fontWeight: 700, color: r.passed ? 'var(--green)' : 'var(--red)' }}>
+                                  {r.score}/{r.totalMarks} ({r.percentage}%)
+                                </div>
+                              </td>
+                              <td style={{ padding: '10px 12px' }}>
+                                {hasMistakes ? (
+                                  <span className="badge badge-red" style={{ fontSize: 11, fontWeight: 700 }}>
+                                    ✕ {r.incorrect} Wrong
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-green" style={{ fontSize: 11, fontWeight: 700 }}>
+                                    ✓ 0 Mistakes
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 12px' }}>
+                                <span className={`badge ${r.passed ? 'badge-green' : 'badge-red'}`} style={{ fontSize: 10 }}>
+                                  {r.passed ? 'PASSED' : 'FAILED'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 12px', color: 'var(--text-2)', fontSize: 11 }}>
+                                {r.timeTaken ? `${Math.floor(r.timeTaken / 60)}m ${r.timeTaken % 60}s` : '—'}
+                              </td>
+                              <td style={{ padding: '10px 12px', color: 'var(--text-3)', fontSize: 11 }}>
+                                {r.submittedAt?.toDate ? r.submittedAt.toDate().toLocaleString() : '—'}
+                              </td>
+                              <td style={{ padding: '10px 12px' }}>
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  style={{ fontSize: 11, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+                                  onClick={() => setSelectedReviewResult(r)}
+                                  title="Open question-by-question mistake inspector for this candidate"
+                                >
+                                  <Eye size={12} /> Inspect Mistakes
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  🔴 Live database listener active • Instant inspection of wrong student answers
+                </span>
+                <button className="btn btn-ghost" onClick={() => setShowGlobalResultsModal(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
